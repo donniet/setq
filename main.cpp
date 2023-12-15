@@ -2,6 +2,9 @@
 #include <functional>
 #include <vector>
 #include <map>
+#include <list>
+#include <set>
+#include <exception>
 
 typedef uint32_t symbol;
 typedef uint64_t identifier;
@@ -86,19 +89,20 @@ private:
     struct seqt_data {
         seqt_type type;
         identifier id;
-        //TODO: look into splay trees as a way to efficiently remove an item?
-        identifier left;    // used as a binary tree if this is a set, 0 if atom
-        identifier right;   // used as a linked list if this is a seq, 0 if atom
-        identifier first;   // this is a reference to the seqt that is first (either top of the binary tree, or first in the sequence)
-                            // this MUST NOT be nil if this is a sequence or set
-        symbol c;           // set to 0 if this isn't an atom
         size_t weight;
-    };
+        
+        // atom parameters
+        symbol c;
 
-    struct tree_node {
-        tree_node * left;
-        tree_node * right;
-        identifier data;
+        // non-atom parameters
+        identifier repr;
+
+        // list parameters
+        identifier seq_next;
+        
+        // tree parameters
+        identifier set_left;
+        identifier set_right;
     };
 
     std::vector<seqt_data> data_;
@@ -111,7 +115,7 @@ public:
 mem::mem() 
     : next_id_(1), data_(1)
 {
-    data_[0] = seqt_data{nil,0,0,0,0,0,0};
+    data_[0] = seqt_data{nil,0,0,0};
     atom_index_[0] = 0;
 }
 
@@ -121,7 +125,9 @@ bool mem::advance_thread(thread& t, symbol c) {
     identifier atom_id = get_atom_id(c);
 
     seqt_data * tail_data = &data_[t.tail_.id_];
-    seqt_data * first_data;
+    seqt_data * following_data = &data_[t.following_.id_];
+
+    std::set<identifier> visited;
 
     // check the symbol of tail_data
     switch(tail_data->type) {
@@ -134,43 +140,93 @@ bool mem::advance_thread(thread& t, symbol c) {
         }
         return false;
     case sequence:
-        if(tail_data->first == atom_id) {
-            t.tail_ = seqt(tail_data->right);
+        // it's repr's all the way down
+        // for(identifier r = tail_data->repr; r != 0; r = data_[r].repr) {
+        //     if(r == atom_id)
+        //         return true;
+        // }
+        // let's keep it O(1) for now
+        if(tail_data->repr == atom_id) {
+            t.tail_ = tail_data->seq_next;
             return true;
         }
-        // some kind of recursion here I think...
-
         return false;
+        
     case set:
-        // we have to look in the binary tree to find atom_id
-        // tricky part is any node could be sequence or a set
-        // but I think that since we are looking for a symbol
-        // we can just look for atoms in this tree maybe?
+        // this time tail points to the set of found elements
+        // assume it's a set of all atoms for now
         
-        // I don't like this.  Maybe use a splay tree to bubble the found item
-        // to the top.  Then make a new seqt entry for the splay tree with
-        // the root node removed
+        // look in the tail to see if we've already found it
+        //TODO: we may need to check for circular loops
 
-        
-
-        tree_node *  new_tail = nullptr;
-        tree_node ** new_tail_inserter = &new_tail;
-
-        first_data = tail_data;
-        while(first_data->first != 0) {
-            if(first_data->first == atom_id) {
-                // found it!
-                // somehow "advance" this set
-                return true;
+        for(;;) {
+            if(visited.find(tail_data->id) != visited.end()) {
+                // circular reference found!!
+                throw std::logic_error("circular reference in set");
             }
-            *new_tail_inserter = new tree_node{nullptr, nullptr, first_data->first};
-
-            if(first_data->first < atom_id) {
-                new_tail_inserter = &(*new_tail_inserter)->left;
-            } else {
-
+            if(tail_data->type != set) {
+                throw std::logic_error("set of non-set elements found!");
             }
+                
+            visited.insert(tail_data->id);
+
+            if(tail_data->id < atom_id) {
+                if(tail_data->set_left == 0)
+                    break;
+                tail_data = &data_[tail_data->set_left];
+                continue;
+            }
+            else if(tail_data->id > atom_id) {
+                if(tail_data->set_right == 0)
+                    break;
+                tail_data = &data_[tail_data->set_right];
+                continue;
+            }
+            
+            return false; // already found!
         }
+
+        // we haven't found it, but tail_data points to where it should be
+        // now look in following to see if it's even supposed to be part of this set
+
+        for(;;) {
+            if(visited.find(following_data->id) != visited.end()) {
+                // circular reference found!!
+                throw std::logic_error("circular reference in set");
+            }
+            if(tail_data->type != set) {
+                throw std::logic_error("set of non-set elements found!");
+            }
+                
+            visited.insert(following_data->id);
+
+            if(following_data->id < atom_id) {
+                if(following_data->set_left == 0)
+                    break;
+                following_data = &data_[following_data->set_left];
+                continue;
+            }
+            else if(following_data->id > atom_id) {
+                if(following_data->set_right == 0)
+                    break;
+                following_data = &data_[following_data->set_right];
+                continue;
+            }
+
+            // we found it!
+            break;
+        }
+
+        if(following_data->id == atom_id) {
+            // insert into the tail
+            if(tail_data->id < atom_id) {
+                // insert right
+            } else {
+                // insert left
+            }
+            return true;
+        }
+        return false;
     }
 
     return false;
