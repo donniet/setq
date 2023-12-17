@@ -232,7 +232,9 @@ bool mem::advance_thread(thread& t, symbol c) {
     return false;
 }
 
-void mem::read(symbol c) {
+
+
+void mem::read_option1(symbol c) {
     // check which tracked sequences expected this symbol
     // collapse the stack
     for_each_thread([c, this](auto & s) {
