@@ -57,6 +57,56 @@ thread::thread(seqt following)
 seqt thread::tail() const { return tail_; }
 
 
+typedef enum {
+    nil = 0, atom, sequence, set
+} seqt_type;
+
+
+struct seqt_data {
+    seqt_type type;
+    identifier id;
+    size_t weight;
+    
+    // atom parameters
+    symbol c;
+
+    // non-atom parameters
+    seqt_data * repr;
+
+    // list parameters
+    seqt_data * seq_prev;
+    seqt_data * seq_next;
+    
+    // tree parameters
+    seqt_data * set_parent;
+    seqt_data * set_left;
+    seqt_data * set_right;
+
+    bool set_find(identifier fid, seqt_data *& found);
+};
+
+bool seqt_data::seq_is_next(identifier fid) {
+    
+}
+
+bool seqt_data::set_find(identifier fid, seqt_data *& found) 
+{
+    seqt_data * cur = this;
+    while(cur != nullptr) {
+        if(fid < cur->repr->id) {
+            cur = cur->set_left;
+            continue;
+        }
+        if(fid > cur->repr->id) {
+            cur = cur->set_right;
+            continue;
+        }
+        found = cur;
+        return true;
+    }
+    return false;
+}
+
 
 struct mem {
     void read(symbol);
@@ -75,35 +125,13 @@ private:
     // storage and creation methods
     void for_each_thread(std::function<void(thread &)>);
     
-    seqt atom(symbol c);
+    seqt create_atom(symbol c);
     seqt create_set(seqt a, seqt b);
     seqt create_seq(seqt a, seqt b);
     void increment_weight(seqt);
     bool advance_thread(thread& t, symbol c);
     identifier get_atom_id(symbol c);
 
-    typedef enum {
-        nil = 0, atom, sequence, set
-    } seqt_type;
-
-    struct seqt_data {
-        seqt_type type;
-        identifier id;
-        size_t weight;
-        
-        // atom parameters
-        symbol c;
-
-        // non-atom parameters
-        identifier repr;
-
-        // list parameters
-        identifier seq_next;
-        
-        // tree parameters
-        identifier set_left;
-        identifier set_right;
-    };
 
     std::vector<seqt_data> data_;
     std::map<symbol, identifier> atom_index_;
