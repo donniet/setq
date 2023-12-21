@@ -136,6 +136,21 @@ private:
     seqt unvisited_;
 };
 
+bool mem::seqt::expects(symbol c) {
+    seqt_data * data = owner_->get_data(id_);
+    if(data == nullptr) return false;
+
+    if(data->ordinality_ == unordered) {
+        // if we are unordered, then we expect something that we haven't already seen
+        return !owner_->find_in_unordered(*this, c);
+    }
+
+    // if we are unordered, then we should see if c 
+    // we need to look through all the seqt's that have c as a repr_
+    // and see if we are the prev of any of them.
+    // I think we should create an unordered seqt for each ordered seqt
+    // that contains ordered pairs of adjacent repr_ maybe?
+}
 
 mem::seqt mem::seqt::append(symbol c, bool default_ordered) const {
     if(is_nil()) {
