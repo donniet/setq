@@ -43,9 +43,6 @@ class mem {
     void reinforce(seqt);
     void disregard(seqt);
 
-    seqt ordered(symbol);
-    seqt unordered(symbol);
-
     seqt nil() const;
 
 public:
@@ -62,16 +59,8 @@ private:
     struct seqt_less {
         bool operator()(seqt const & a, seqt const & b) const;
     };
-    std::vector<thread> threads_;
-    std::deque<ident> recycled_;
-    ident next_id_;
 
-    std::map<symbol, ident> atom_index_;
-    // an index which maps a seq A, to a set containing
-    // all the seqs which have a single symbol appended to A
-    std::map<tuple<ident, symbol>, ident> ordered_next_index_; 
-
-    seqt create_atom(symbol c);
+    // uses the raw operations
     seqt create_ordered(seqt prev, symbol c);
     seqt create_ordered(symbol c);
     seqt create_unordered(seqt prev, symbol c);
@@ -81,9 +70,20 @@ private:
 
     mem::seqt splay(seqt, symbol);
 
-    int compare(seqt, symbol);
+    // raw operations
+    seqt_data * get_data(ident);
+    tuple<ident,seqt_data*> new_seqt(symbol, ordinality);
 
-    seqt_data & data(ident);
+    // data members
+
+    std::vector<thread> threads_;
+    std::deque<ident> recycled_;
+    std::vector<seqt_data> data_;
+    ident next_id_;
+
+    std::map<symbol, ident> atom_index_;
+    std::map<ident, symbol> symbol_index_;
+
 };
 
 struct mem::seqt {
@@ -98,7 +98,7 @@ struct mem::seqt {
 
     // iterator set_find(seqt const & s);
 
-    seqt append(symbol, bool ordered_if_atom = true) const;
+    seqt append(symbol, bool default_ordered = true) const;
     seqt remove(symbol) const;
     symbol repr() const;
     bool expects(symbol);
@@ -120,9 +120,9 @@ private:
 
 struct mem::seqt_data {
     ordinality ordinality_;
+    symbol repr_;
     ident left_;
     ident right_;
-    symbol repr_;
 };
 
 struct mem::thread {
@@ -137,14 +137,12 @@ private:
 };
 
 
-mem::seqt mem::seqt::append(symbol c, bool ordered_if_atom) const {
-    if(is_nil()) return owner_->create_atom(c);
-    if(is_atom()) {
-        if(ordered_if_atom) return owner_->create_ordered(*this, c);
-        return owner_->create_unordered(*this, c);
+mem::seqt mem::seqt::append(symbol c, bool default_ordered) const {
+    if(is_nil()) {
+        if(default_ordered) return owner_->create_ordered(c);
+        return owner_->create_unordered(c);
     }
     if(is_ordered()) return owner_->create_ordered(*this, c);
-    /* if(is_unordered()) */
     return owner_->create_unordered(*this, c);
 }
 
@@ -172,71 +170,83 @@ bool mem::thread::advance(symbol c) {
     return true;
 }
 
-mem::seqt mem::create_atom(symbol c) {
-    return seqt(c);
-}
-
 mem::seqt mem::create_ordered(mem::seqt prev, symbol c) {
-    auto a = create_atom(c);
+    ident id;
+    mem::seqt_data * temp;
 
-    auto i = ordered_next_index_.find({prev.id_, c});
-    if(i != ordered_next_index_.end()) 
-        return seqt(i->second, this); // found it
-
-    auto id = next_id_++;
-    ordered_next_index_[{prev.id_, c}] = id;
+    mem::seqt_data * p = get_data(prev.id_);
+    tie(id, temp) = new_seqt(c, ordered);
+    if(p == nullptr) {
+        return seqt(id, this);
+    }
+    temp->left_ = prev.id_;
     return seqt(id, this);
 }
 
 // returns an unordered seqt which is 
 mem::seqt mem::splay(mem::seqt root, symbol c) {
-    if(!root.is_unordered()) 
-        return nil();
+    mem::seqt_data * cur = get_data(root.id_);
 
-    mem::seqt ret = create_unordered(c);
+    ident ret_id;
+    mem::seqt_data * ret;
+    tie(ret_id, ret) = new_seqt(c, unordered);
+    if(cur == nullptr)
+        return seqt(ret_id, this);
 
-    mem::seqt_data & dat = data(ret.id_);
-    mem::seqt_data & rd = data(root.id_);
-    ident * left = &dat.left_;
-    ident * right = &dat.right_;
+    // let's just create new nodes for now.  
+    // maybe we can filter them later.
 
+    ident * left_insert = &ret->left_;
+    ident * right_insert = &ret->right_;
 
+    ident temp_id = root.id_;
+    mem::seqt_data * temp;
 
-    while(root.is_unordered()) {
-        if(c < rd.repr_) {
-            *right = create_unordered(root.repr()).id_;
-            mem::seqt_data & temp = data(*right);
-            temp.right_ = rd.right_;
-            rd = temp;
-        } else if(c > root.repr()) {
-            cr.left() = create_unordered(root.repr());
-            cr = cr.left();
-            cl->right() = root.right();
-            root = *root.left();
-        } else {
+    while(cur != nullptr) {
+        if(cur->ordinality_ != unordered) {
+            // insert ordered seqts on the right
+            *right_insert = temp_id;
+            break;
+        }
+        
+        if(cur->repr_ < c) {
+            // we should move cur to the left
+            tie(*left_insert, temp) = new_seqt(cur->repr_, unordered);
+            temp->left_ = cur->left_;
+            left_insert = &temp->right_;
+            temp_id = cur->right_;
+            cur = get_data(cur->right_);
+        } 
+        else if(c < cur->repr_) {
+            tie(*right_insert, temp) = new_seqt(cur->repr_, unordered);
+            temp->right_ = cur->right_;
+            right_insert = &temp->left_;
+            temp_id = cur->left_;
+            cur = get_data(cur->left_);
+        }
+        else {
+            *left_insert = cur->left_;
+            *right_insert = cur->right_;
             break;
         }
     }
 
-    return ret;
+    return seqt(ret_id, this);
 }
 
-bool mem::find_in_unordered(mem::seqt in, symbol c) {
-    auto a = create_atom(c);
+bool mem::find_in_unordered(mem::seqt root, symbol c) {
+    mem::seqt_data * cur = get_data(root.id_);
 
-    while(!in.is_nil() && in != a) {
-        
+    while(cur != nullptr && cur->ordinality_ == unordered) {
+        if(cur->repr_ < c)
+            cur = get_data(cur->right_);
+        else if(c < cur->repr_)
+            cur = get_data(cur->left_);
+        else
+            return true;
     }
-}
 
-mem::seqt mem::create_unordered_without(mem::seqt s, symbol c) {
-    if(!find_in_unordered(s, c)) // O(log N)
-        return s;
-
-    auto lt = create_unordered_lt(s, c); 
-    auto gt = create_unordered_gt(s, c);
-
-    return unordered_join(lt, gt);
+    return false;
 }
 
 /*
@@ -249,20 +259,51 @@ unordered seqt:
 */
 
 mem::seqt mem::create_unordered(mem::seqt prev, symbol c) {
-    auto a = create_atom(c);
-
-    // is this atom already in prev?
-    if(find_in_unordered(prev, a))
-        return prev;
-
-    // unorderd sets are binary trees, which are really ordered pairs
-    // of binary trees. If we have an unordered set equal to {prev U {c}}
-    // and prev already exists, then L = {x | x \in prev x < c} should exist
-    auto lt = create_unordered_lt(prev, c);
-    auto gt = create_unordered_gt(prev, c);
-
-    return unordered_join(unordered_join(lt, c), gt);
+    seqt s = splay(prev, c);
+    if(s.is_nil()) {
+        int id;
+        seqt_data * _;
+        tie(id, _) = new_seqt(c, unordered);
+        return seqt(id, this);
+    }
+    return s;
 }
+
+mem::seqt mem::create_ordered(symbol c) {
+    ident id;
+    seqt_data * _;
+    tie(id, _) = new_seqt(c, ordered);
+    return seqt(id, this);
+}
+
+mem::seqt mem::create_unordered(symbol c) {
+    ident id;
+    seqt_data * _;
+    tie(id, _) = new_seqt(c, unordered);
+    return seqt(id, this);
+}
+
+tuple<mem::ident, mem::seqt_data*> mem::new_seqt(symbol c, ordinality ord) {
+    ident id;
+    seqt_data * data;
+    if(!recycled_.empty()) {
+        id = recycled_.back();
+        recycled_.pop_back();
+        data = get_data(id);
+
+        data->ordinality_ = ord;
+        data->left_ = 0;
+        data->right_ = 0;
+        data->repr_ = c;
+    } else {
+        id = next_id_++;
+        data = &*data_.insert(data_.begin() + id, seqt_data{
+            ord, c, 0, 0
+        }); 
+    }
+    return {id, data};
+}
+
 
 void mem::for_each_thread(std::function<void(thread&)> func) {
     for(auto i = threads_.begin(); i != threads_.end(); i++)
@@ -280,8 +321,8 @@ void mem::read(uint32_t in) {
             reinforce(t.visited().append(c));
         }
     });
-    reinforce(ordered(c));
-    reinforce(unordered(c));
+    reinforce(create_ordered(c));
+    reinforce(create_unordered(c));
 }
 
 int main(int, char**) {

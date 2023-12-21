@@ -26,16 +26,23 @@ struct splay_tree {
         node * cur = root_;
 
         while(cur != nullptr) {
-            if(cur->value_ < v) {                   // is the current node's value less than v?
+            if(cur->value_ < v) {                       // is the current node's value less than v?
                 *left_insert = cur;                     //   insert our current pointer on the left
                 cur = cur->right_;                      //   move our current position to the right child
                 left_insert = &(*left_insert)->right_;  //   move our left insert position to the right child
                 *left_insert = nullptr;                 //   unlink the right child (tracked by cur now)
-            } else {                                    // otherwise do the mirror
+            } else if(v < cur->value_) {                // otherwise do the mirror
                 *right_insert = cur;                    
                 cur = cur->left_;
                 right_insert = &(*right_insert)->left_;
                 *right_insert = nullptr;
+            } else {                                    // this means we found our value
+                *left_insert = cur->left_;              // insert cur's left into the left insert
+                *right_insert = cur->right_;            // do the same for the right
+                cur->left_ = left;                      // link our left tree with cur's left
+                cur->right_ = right;                    // and our right tree with cur's right
+                root_ = cur;                            // set root to cur
+                return;     
             }
         }
 
@@ -145,7 +152,7 @@ int main(int, char**) {
 
     splay_tree<char> t;
 
-    string str("gnarlygreenghast");
+    string str("gnarlygreenghastgah");
 
     for(auto i = str.begin(); i != str.end(); i++) {
         t.insert(*i);
