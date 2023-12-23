@@ -39,11 +39,12 @@ class mem {
 
     friend struct seqt;
 
-    void for_each_thread(std::function<void(thread &)>);
-    void reinforce(seqt);
-    void disregard(seqt);
+    
+    void process_threads(std::function<void(thread &)>);
+    void reinforce(thread);
+    void disregard(thread);
 
-    seqt nil() const;
+    seqt nil();
 
 public:
     void read(uint32_t c);
@@ -68,8 +69,10 @@ private:
 
     bool find_in_unordered(seqt, symbol);
 
-    mem::seqt splay_insert(seqt, symbol);
-    mem::seqt splay_remove(seqt, symbol);
+    seqt maximum_unordered(seqt);
+    ident merge_unordered_ids(ident, ident);
+    seqt splay_insert(seqt, symbol);
+    seqt splay_remove(seqt, symbol);
 
     // raw operations
     seqt_data * get_data(ident);
@@ -77,16 +80,22 @@ private:
 
     // data members
 
-    std::vector<thread> threads_;
+    typedef std::vector<thread> thread_container;
+    thread_container threads_;
+
     std::deque<ident> recycled_;
     std::vector<seqt_data> data_;
     ident next_id_;
 
     // indexes
-    std::map<symbol, ident> atom_index_;
-    std::map<ident, symbol> symbol_index_;
+    std::map<symbol, ident> unordered_atom_index_;
+    std::map<symbol, ident> ordered_atom_index_;
+    // std::map<ident, symbol> symbol_index_;
 
     std::map<tuple<ident,symbol>,ident> ordered_next_index_;
+
+public:
+    mem();
 };
 
 struct mem::seqt {
@@ -118,7 +127,7 @@ private:
     seqt() : id_(0), owner_(nullptr) { }
     seqt(mem * owner) : id_(0), owner_(owner) { }
     seqt(ident id) : id_(id), owner_(nullptr) { }
-    seqt(ident id, mem * owner) : id_(0), owner_(owner) { }
+    seqt(ident id, mem * owner) : id_(id), owner_(owner) { }
 };
 
 struct mem::seqt_data {
@@ -137,6 +146,9 @@ struct mem::thread {
 private:
     seqt visited_;
     seqt unvisited_;
+public:
+    thread(mem::seqt un) : visited_(0, un.owner_), unvisited_(un)  { }
+    thread(mem::seqt vis, mem::seqt un) : visited_(vis), unvisited_(un) { } 
 };
 
 mem::seqt mem::seqt::remove(symbol c) const {
@@ -147,13 +159,13 @@ mem::seqt mem::seqt::remove(symbol c) const {
         // "removing" from an ordered seqt means advancing it to the next symbol if we expect c
         auto i = owner_->ordered_next_index_.find({id_, c});
         if(i == owner_->ordered_next_index_.end())
-            return seqt(i->second, owner_);
+            return seqt(i->second, owner_); // found it, return the next ordered element
 
         return *this;
     }
 
     // "removing" from an unordered seqt means what you think it means
-    
+    return owner_->splay_remove(*this, c);
 }
 
 mem::seqt mem::seqt::expects(symbol c) {
@@ -212,8 +224,9 @@ bool mem::seqt_less::operator()(mem::seqt const & a, mem::seqt const & b) const 
 }
 
 bool mem::thread::advance(symbol c) {
-    if(!unvisited().expects(c))
+    if(!unvisited().expects(c)) {
         return false;
+    }
 
     // move this thread forward
     visited() = visited().append(c);
@@ -229,6 +242,22 @@ mem::seqt mem::thread::unvisited() {
     return unvisited_;
 }
 
+mem::mem() : next_id_(1) {
+    // insert the null seqt, why not?
+    data_.insert(data_.begin(), seqt_data{ordered, 0, 0, 0});
+}
+
+mem::seqt mem::nil() {
+    return seqt(0, this);
+}
+
+/* splay_remove
+    This isn't exactly a splay.  I think of it like cutting a tree in
+    a zig-zag pattern, and welding it together with new nodes as you go
+    until you find what you are looking for.  I'm hoping this keeps the
+    rough top-to-bottom order of the tree so that removal doesn't 
+    elevate elements like a typical splay would.
+ */
 mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
     mem::seqt_data * cur = get_data(root.id_);
 
@@ -236,7 +265,7 @@ mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
         return root;
 
     ident ret_id = 0;
-    mem::seqt_data * ret = nullptr;
+    mem::seqt_data * tmp = nullptr;
     ident * insert_point = &ret_id;
 
     /*      @        @ is new
@@ -244,10 +273,10 @@ mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
           *   x      x is the new insertion point
      */
     auto copy_left = [&](mem::seqt_data * l) { 
-        tie(*insert_point, ret) = new_seqt(l->repr_, unordered);
-        ret->left_ = l->left_;
-        ret->right_ = 0;
-        insert_point = &ret->right_;
+        tie(*insert_point, tmp) = new_seqt(l->repr_, unordered);
+        tmp->left_ = l->left_;
+        tmp->right_ = 0;
+        insert_point = &tmp->right_;
     };
 
     /*      @        @ is new
@@ -255,10 +284,10 @@ mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
           x   *      x is the new insertion point
      */
     auto copy_right = [&](mem::seqt_data * r) { 
-        tie(*insert_point, ret) = new_seqt(r->repr_, unordered);
-        ret->right_ = r->right_;
-        ret->left_ = 0;
-        insert_point = &ret->left_;    
+        tie(*insert_point, tmp) = new_seqt(r->repr_, unordered);
+        tmp->right_ = r->right_;
+        tmp->left_ = 0;
+        insert_point = &tmp->left_;    
     };
     
     bool found = false;
@@ -275,16 +304,16 @@ mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
         }
 
         if(cur->repr_ < c) {
-            tie(*insert_point, ret) = new_seqt(cur->repr_, unordered);
-            ret->left_ = cur->left_;
-            ret->right_ = 0;
-            insert_point = &ret->right_;
+            tie(*insert_point, tmp) = new_seqt(cur->repr_, unordered);
+            tmp->left_ = cur->left_;
+            tmp->right_ = 0;
+            insert_point = &tmp->right_;
             cur = get_data(cur->right_);
         } else { // if(c < cur->repr_)
-            tie(*insert_point, ret) = new_seqt(cur->repr_, unordered);
-            ret->right_ = cur->right_;
-            ret->left_ = 0;
-            insert_point = &ret->left_;
+            tie(*insert_point, tmp) = new_seqt(cur->repr_, unordered);
+            tmp->right_ = cur->right_;
+            tmp->left_ = 0;
+            insert_point = &tmp->left_;
             cur = get_data(cur->left_);
         }
     }
@@ -292,11 +321,26 @@ mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
     if(found) {
         // first go down the left side, but look for the first 
         // right pointer that is null and store a reference to it
-        ident * right_insertion;
-        
+        if(cur->left_ != 0) {
+            *insert_point = cur->left_; // prioritize left
+        }
+        if(cur->right_ != 0) {
+            while(*insert_point != 0) {
+                // left is also non-nil, so we have to merge them 
+                // by moving right until we get to a null node
+                tmp = get_data(*insert_point);
+                insert_point = &tmp->right_;
+            }
+            *insert_point = cur->right_;
+        }
+
+        return seqt(ret_id, this);
     }
 
-    return seqt(ret_id, this);
+    // we didn't find it, just return root
+    // the new nodes created should get deleted since they are 
+    // unlinked
+    return root;
 }
 
 // returns an unordered seqt which is 
@@ -419,6 +463,19 @@ mem::seqt_data* mem::get_data(ident id) {
 tuple<mem::ident, mem::seqt_data*> mem::new_seqt(symbol c, ordinality ord) {
     ident id;
     seqt_data * data;
+
+    switch(ord) {
+    case ordered:
+        // use a for loop for scope
+        for(auto i = ordered_atom_index_.find(c); i != ordered_atom_index_.end();)
+            return {i->second, &data_[i->second]};
+        break;
+    case unordered:
+        for(auto i = unordered_atom_index_.find(c); i != unordered_atom_index_.end();)
+            return {i->second, &data_[i->second]};
+        break;
+    }
+
     if(!recycled_.empty()) {
         id = recycled_.back();
         recycled_.pop_back();
@@ -437,39 +494,52 @@ tuple<mem::ident, mem::seqt_data*> mem::new_seqt(symbol c, ordinality ord) {
     return {id, data};
 }
 
-void mem::disregard(mem::seqt s) {
+void mem::disregard(mem::thread t) {
     // TODO: implement me!
 }
 
-void mem::reinforce(mem::seqt s) {
+void mem::reinforce(mem::thread t) {
     // TODO: implement me!
+
+    threads_.push_back(t);
 }
 
 
-void mem::for_each_thread(std::function<void(thread&)> func) {
-    for(auto i = threads_.begin(); i != threads_.end(); i++)
+void mem::process_threads(std::function<void(thread&)> func) {
+    //HACK: this is just to avoid all the hard work of modifying the threads as we iterate over them
+    thread_container temp = threads_; // copy the threads and iterate over the copy
+    threads_.clear(); // clear the threads so that they are ready to be added back
+    for(auto i = temp.begin(); i != temp.end(); i++)
         func(*i);
 }
 
 void mem::read(uint32_t in) {
     auto c = symbol(in);
-    
-    for_each_thread([c, this](thread & t) {
+
+    process_threads([c, this](thread & t) {
         if(t.advance(c)) {
-            reinforce(t.visited());
-        } else {
-            disregard(t.visited());
-            reinforce(t.visited().append(c));
+            reinforce(t);
+        } 
+        else {
+            disregard(t);                                // disregard this since it didn't expect this symbol
+            reinforce(thread(t.visited().append(c)));    // but start a new thread by appending the found symbol 
+                                                         // onto the visited elements
         }
     });
-    reinforce(create_ordered(c));
-    reinforce(create_unordered(c));
+    reinforce(thread(create_ordered(c), nil()));
+    reinforce(thread(create_unordered(c), nil()));
 }
 
 int main(int, char**) {
     using std::cin;
 
     mem m;
+
+    const char * in = "ablkjasdrlkewjoasdigjierieoir2834rudkjfalksdhgj8q2934hrauisdjhfkasdjhf98234roiadsjsfa iu932r asdf ";
+
+    for(int i = 0; i < strlen(in); i++) {
+        m.read(in[i]);
+    }
 
     while(cin) {
         auto c = cin.get();
