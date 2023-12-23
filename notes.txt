@@ -1,0 +1,4 @@
+* test splay insert/remove
+* add weighted reinforement
+* use weights to disregard
+* test out garbage collection
