@@ -1,3 +1,6 @@
+#ifndef __SPLAY_HPP__
+#define __SPLAY_HPP__
+
 #include <iostream>
 #include <functional>
 #include <vector>
@@ -5,13 +8,18 @@
 
 #include <string>
 
+using std::vector, std::tuple, std::tie, std::cerr, std::cout, 
+      std::endl, std::ostream;
 /*
 writing this alrogithm down with tests so I make sure I get it right
 */
 
 template<typename T>
-struct splay_tree {
-    struct node {
+struct splay_tree 
+{
+    struct node 
+    {
+
         T value_;
         node * left_;
         node * right_;
@@ -20,18 +28,20 @@ struct splay_tree {
         node(T value, node * left, node * right, size_t id)
             : value_(value), left_(left), right_(right), id_(id)
         { 
-            std::cerr << "create: " << id_ << std::endl;
+            cerr << "create: " << id_ << endl;
         }
 
-        ~node() {
-            std::cerr << "destroy: " << id_ << std::endl;
+        ~node() 
+        {
+            cerr << "destroy: " << id_ << endl;
         }
     };
 
     node * root_;
     size_t next_id_;
 
-    void remove(T const & v) {
+    void remove(T const & v) 
+    {
         node * left = nullptr, * right = nullptr;
         node ** left_insert = &left, ** right_insert = &right;
 
@@ -40,31 +50,38 @@ struct splay_tree {
 
         bool found = false;
 
-        while(cur != nullptr) {
-            if(cur->value_ < v) {
+        while(cur != nullptr) 
+        {
+            if(cur->value_ < v) 
+            {
                 *left_insert = cur;
                 cur = cur->right_;
                 left_insert = &(*left_insert)->right_;
                 *left_insert = nullptr;
             }
-            else if(v < cur->value_) {
+            else if(v < cur->value_) 
+            {
                 *right_insert = cur;
                 cur = cur->left_;
                 right_insert = &(*right_insert)->left_;
                 *right_insert = nullptr;
             }
-            else {
+            else 
+            {
                 found = true;
                 break;
             }
         }
 
-        if(found) {
-            if(cur->left_ != nullptr) {
+        if(found) 
+        {
+            if(cur->left_ != nullptr) 
+            {
                 *left_insert = cur->left_;
                 cur->left_ = nullptr;
             }
-            if(cur->right_ != nullptr) {
+            if(cur->right_ != nullptr) 
+            {
                 *right_insert = cur->right_;
                 cur->right_ = nullptr;
             }
@@ -75,7 +92,8 @@ struct splay_tree {
         root_ = merge(left, right);
     }
 
-    static node * merge(node * left, node * right) {
+    static node * merge(node * left, node * right, bool prefer_left = true) 
+    {
         if(left == nullptr)
             return right; // could be null
 
@@ -83,20 +101,29 @@ struct splay_tree {
             return left;
         
         // both are non-null
-        node * max = max_node(left);
-        max->right_ = right;
-        return left;
+        if(prefer_left)
+        {
+            node * max = max_node(left);
+            max->right_ = right;
+            return left;
+        }
+        node * max = max_node(right);
+        max->right_ = left;
+        return right;
+
     }
 
     // does not check for null
-    static node * max_node(node * r) {
+    static node * max_node(node * r) 
+    {
         while(r->right_ != nullptr)
             r = r->right_;
 
         return r;
     }
 
-    void insert(T const & v) {
+    void insert(T const & v) 
+    {
         node * left = nullptr, * right = nullptr;
         node ** left_insert = &left, ** right_insert = &right;
 
@@ -128,7 +155,8 @@ struct splay_tree {
         root_ = new node(v, left, right, next_id_++);
     }
 
-    bool contains(T const & v) const {
+    bool contains(T const & v) const 
+    {
         // we won't splay on contains to simplify things
         node * cur = root_;
         while(cur != nullptr) {
@@ -143,58 +171,75 @@ struct splay_tree {
         return false;
     }
 
-    splay_tree() : root_(nullptr), next_id_(0) { };
-    ~splay_tree() {
-        if(root_ == nullptr) 
+    splay_tree() 
+        : root_(nullptr), next_id_(0) 
+    { };
+
+    ~splay_tree()
+    {
+        destroy_tree(root_);
+    }
+
+    static void destroy_tree(node *& root) 
+    {
+        if(root == nullptr) 
             return;
 
-        std::vector<node*> stack;
-        stack.push_back(root_);
+        vector<node*> stack;
+        stack.push_back(root);
 
-        while(!stack.empty()) {
+        while(!stack.empty()) 
+        {
             node * n = stack.back();
             stack.pop_back();
 
-
-            if(n->left_ != nullptr) {
+            if(n->left_ != nullptr) 
+            {
                 stack.push_back(n->left_);
                 n->left_ = nullptr;
             }
-            if(n->right_ != nullptr) {
+            if(n->right_ != nullptr) 
+            {
                 stack.push_back(n->right_);
                 n->right_ = nullptr;
             }
 
             delete n;
         }
+
+        root = nullptr;
     }
 
-    void visit_preorder(std::function<void(T const &)> f) const {
+    void visit_preorder(std::function<void(T const &)> func) const 
+    {
         if(root_ == nullptr) return;
 
-        std::vector<node*> stack;
+        vector<node*> stack;
         stack.push_back(root_);
 
         while(!stack.empty()) {
             node * n = stack.back();
             stack.pop_back();
 
-            if(n->left_ != nullptr) stack.push_back(n->left_);
-            if(n->right_ != nullptr) stack.push_back(n->right_);
+            if(n->left_ != nullptr) 
+                stack.push_back(n->left_);
+            if(n->right_ != nullptr) 
+                stack.push_back(n->right_);
 
-            f(n->value_);
+            func(n->value_);
         }
     }
 
-    std::ostream & print(std::ostream & os) {
-        using std::vector, std::tuple, std::tie;
-
-        if(root_ == nullptr) {
+    ostream & print(ostream & os) 
+    {
+        if(root_ == nullptr) 
+        {
             os << "\n";
             return os;
         }
         
-        typedef enum {
+        typedef enum 
+        {
             value = 0, comma = 1, up = 2
         } direction;
 
@@ -205,26 +250,34 @@ struct splay_tree {
         direction dir;
         int depth;
 
-        while(!stack.empty()) {
+        while(!stack.empty()) 
+        {
             tie(n, dir, depth) = stack.back();
             stack.pop_back();
 
-            if(n == nullptr) {
-                for(int d = depth; d >= 0; d--) os << " ";
+            if(n == nullptr) 
+            {
+                for(int d = depth; d >= 0; d--) 
+                    os << " ";
                 os << "_\n";
-                continue;
+
+                continue; // while
             }
 
             switch(dir) {
             case value:
-                for(int d = depth; d >= 0; d--) os << " ";
+                for(int d = depth; d >= 0; d--) 
+                    os << " ";
+
                 os << n->value_ << "\n";
                 stack.push_back({n, up, depth});
                 if(n->right_ != nullptr) 
                     stack.push_back({n->right_, value, depth+1});
+
                 stack.push_back({n, comma, depth});
                 if(n->left_ != nullptr)
                     stack.push_back({n->left_, value, depth+1});
+
                 break;
             case comma:
                 // os << ",";
@@ -238,42 +291,5 @@ struct splay_tree {
     }
 };
 
-int main(int, char**) {
-    using std::cout, std::endl, std::string;
 
-    splay_tree<char> * t = new splay_tree<char>();
-
-    string str("gnarlygreenghastgah");
-
-    for(auto i = str.begin(); i != str.end(); i++) {
-        t->insert(*i);
-    }
-
-    char check [] =  { 'e',  'n',   'q',   't',   'e',  'g',  'h' };
-    
-    for(int i = 0; i < sizeof(check)/sizeof(char); i++) {
-        cout << "string: '" << str << "' contains '" << check[i] << "'? " << t->contains(check[i]) << endl;
-    }
-
-    cout << "visiting: ";
-    t->visit_preorder([](char const & c) {
-        cout << c;
-    });
-    cout << endl;
-
-    t->print(cout) << endl;
-
-    for(int i = sizeof(check)/sizeof(char) - 1; i >= 0; i--) {
-        cout << "deleting: " << check[i] << endl;
-        t->remove(check[i]);
-
-        t->print(cout) << endl;
-    }
-    
-    cout << endl;
-
-    cout << "deleting tree" << endl;
-    delete t;
-
-    return 0;
-}
+#endif
