@@ -19,20 +19,28 @@ int main(int ac, char** av) {
 
     bool all_succeeded = true;
 
+    auto run_all = [&]() {
+        for(auto j = tests.begin(); j != tests.end(); j++)
+            if(!j->second())
+                all_succeeded = false;
+    };
+
     for(int i = 1; i < ac; i++) {
         if(string("all") == av[i]) {
-            for(auto j = tests.begin(); j != tests.end(); j++)
-                if(!j->second())
-                    all_succeeded = false;
-                
-            break;
+            run_all();
+            continue;
         }
 
         auto j = tests.find(av[i]);
-        if(j != tests.end())
-            if(!j->second())
-                all_succeeded = false;
+        if(j == tests.end())
+            continue;
+
+        if(!j->second())
+            all_succeeded = false;
     }
+
+    if(ac <= 1)
+        run_all();
 
     if(all_succeeded) {
         cout << "ALL TESTS SUCCEEDED" << endl;
