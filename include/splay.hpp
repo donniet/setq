@@ -28,12 +28,12 @@ struct splay_tree
         node(T value, node * left, node * right, size_t id)
             : value_(value), left_(left), right_(right), id_(id)
         { 
-            cerr << "create: " << id_ << endl;
+            // cerr << "create: " << id_ << endl;
         }
 
         ~node() 
         {
-            cerr << "destroy: " << id_ << endl;
+            // cerr << "destroy: " << id_ << endl;
         }
     };
 

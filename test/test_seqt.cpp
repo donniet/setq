@@ -3,6 +3,13 @@
 
 #include <iostream> 
 
+using std::ostream, std::cout, std::endl, std::cerr;
+
+void test_insert()
+{
+    
+}
+
 int main(int, char**) {
     using std::cin;
 

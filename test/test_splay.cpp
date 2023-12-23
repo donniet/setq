@@ -1,42 +1,78 @@
 
 #include "splay.hpp"
+#include "test.hpp"
 
-int main(int, char**) {
-    using std::cout, std::endl, std::string;
+#include <map>
+#include <functional>
+#include <vector>
 
-    splay_tree<char> * t = new splay_tree<char>();
+using std::cout, std::endl, std::string, std::map, std::function, std::vector;
 
-    string str("gnarlygreenghastgah");
+test insert();
+test remove();
 
-    for(auto i = str.begin(); i != str.end(); i++) {
-        t->insert(*i);
+int main(int ac, char** av) {
+    map<string, test(*)()> tests = {
+        {"insert", insert},
+        {"remove", remove},
+    };
+
+    bool all_succeeded = true;
+
+    for(int i = 1; i < ac; i++) {
+        if(string("all") == av[i]) {
+            for(auto j = tests.begin(); j != tests.end(); j++)
+                if(!j->second())
+                    all_succeeded = false;
+                
+            break;
+        }
+
+        auto j = tests.find(av[i]);
+        if(j != tests.end())
+            if(!j->second())
+                all_succeeded = false;
     }
 
-    char check [] =  { 'e',  'n',   'q',   't',   'e',  'g',  'h' };
+    if(all_succeeded) {
+        cout << "ALL TESTS SUCCEEDED" << endl;
+        return 0;
+    }
     
-    for(int i = 0; i < sizeof(check)/sizeof(char); i++) {
-        cout << "string: '" << str << "' contains '" << check[i] << "'? " << t->contains(check[i]) << endl;
-    }
+    cout << "TEST FAILED" << endl;
+    return -1;
+}
 
-    cout << "visiting: ";
-    t->visit_preorder([](char const & c) {
-        cout << c;
-    });
-    cout << endl;
+test insert() 
+{
+    test t("insert");
 
-    t->print(cout) << endl;
+    splay_tree<char> tree;
+    tree.insert('a');
 
-    for(int i = sizeof(check)/sizeof(char) - 1; i >= 0; i--) {
-        cout << "deleting: " << check[i] << endl;
-        t->remove(check[i]);
+    if(tree.contains('a'))
+        return t.success();
 
-        t->print(cout) << endl;
-    }
-    
-    cout << endl;
+    return t.failure("'a' was not found in splay_tree"); 
+}
 
-    cout << "deleting tree" << endl;
-    delete t;
+test remove() {
+    test t("remove");
 
-    return 0;
+    splay_tree<string> tree;
+    vector<string> to_insert = {
+        "mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"
+    };
+
+    for(auto s : to_insert)
+        tree.insert(s);
+
+    if(!tree.contains("pluto"))
+        return t.failure("tree did not contain inserted data 'pluto'");
+
+    tree.remove("pluto");
+    if(tree.contains("pluto"))
+        return t.failure("removed item 'pluto' was still found in tree");
+
+    return t.success();
 }
