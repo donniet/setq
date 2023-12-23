@@ -1,24 +1,24 @@
 #include "seqt.hpp"
 
 
-mem::seqt mem::seqt::remove(symbol c) const {
+seqt::node seqt::node::remove(symbol c) const {
     seqt_data * data = owner_->get_data(id_);
     if(data == nullptr) return *this;
 
     if(data->ordinality_ == ordered) {
-        // "removing" from an ordered seqt means advancing it to the next symbol if we expect c
+        // "removing" from an ordered node means advancing it to the next symbol if we expect c
         auto i = owner_->ordered_next_index_.find({id_, c});
         if(i == owner_->ordered_next_index_.end())
-            return seqt(i->second, owner_); // found it, return the next ordered element
+            return node(i->second, owner_); // found it, return the next ordered element
 
         return *this;
     }
 
-    // "removing" from an unordered seqt means what you think it means
+    // "removing" from an unordered node means what you think it means
     return owner_->splay_remove(*this, c);
 }
 
-mem::seqt mem::seqt::expects(symbol c) {
+seqt::node seqt::node::expects(symbol c) {
     seqt_data * data = owner_->get_data(id_);
     if(data == nullptr) return false;
 
@@ -28,9 +28,9 @@ mem::seqt mem::seqt::expects(symbol c) {
     }
 
     // if we are unordered, then we should see if c 
-    // we need to look through all the seqt's that have c as a repr_
+    // we need to look through all the node's that have c as a repr_
     // and see if we are the prev of any of them.
-    // I think we should create an unordered seqt for each ordered seqt
+    // I think we should create an unordered node for each ordered node
     // that contains ordered pairs of adjacent repr_ maybe?
     // i think that might be too much for now.  I think I'll cache 
     // the seqts as they are created/loaded and just look at the cache.
@@ -38,19 +38,19 @@ mem::seqt mem::seqt::expects(symbol c) {
     // of ordered pairs of {symbol, following_id} sequences
     auto i = owner_->ordered_next_index_.find({id_, c});
     if(i != owner_->ordered_next_index_.end()) {
-        return seqt(i->second, owner_);
+        return node(i->second, owner_);
     }
-    return seqt(0, owner_);
+    return node(0, owner_);
 }
 
-bool mem::seqt::is_ordered() const {
+bool seqt::node::is_ordered() const {
     seqt_data * data = owner_->get_data(id_);
     if(data == nullptr) return false;
 
     return data->ordinality_ == ordered;
 }
 
-mem::seqt mem::seqt::append(symbol c, bool default_ordered) const {
+seqt::node seqt::node::append(symbol c, bool default_ordered) const {
     if(is_nil()) {
         if(default_ordered) return owner_->create_ordered(c);
         return owner_->create_unordered(c);
@@ -59,21 +59,21 @@ mem::seqt mem::seqt::append(symbol c, bool default_ordered) const {
     return owner_->create_unordered(*this, c);
 }
 
-bool mem::seqt::is_nil() const { return id_ == 0; }
+bool seqt::node::is_nil() const { return id_ == 0; }
 
 
-bool mem::seqt::operator==(seqt const & a) const {
+bool seqt::node::operator==(node const & a) const {
     return id_ == a.id_ && owner_ == a.owner_;
 }
 
-bool mem::seqt_less::operator()(mem::seqt const & a, mem::seqt const & b) const {
+bool seqt::seqt_less::operator()(seqt::node const & a, seqt::node const & b) const {
     if(a.owner_ < b.owner_) return true; // atoms are less than non-atoms
     if(b.owner_ < a.owner_) return false; 
     if(a.id_ < b.id_) return true;
     return false;
 }
 
-bool mem::thread::advance(symbol c) {
+bool seqt::thread::advance(symbol c) {
     if(!unvisited().expects(c)) {
         return false;
     }
@@ -84,21 +84,21 @@ bool mem::thread::advance(symbol c) {
     return true;
 }
 
-mem::seqt mem::thread::visited() {
+seqt::node seqt::thread::visited() {
     return visited_;
 }
 
-mem::seqt mem::thread::unvisited() {
+seqt::node seqt::thread::unvisited() {
     return unvisited_;
 }
 
-mem::mem() : next_id_(1) {
-    // insert the null seqt, why not?
+seqt::seqt() : next_id_(1) {
+    // insert the null node, why not?
     data_.insert(data_.begin(), seqt_data{ordered, 0, 0, 0});
 }
 
-mem::seqt mem::nil() {
-    return seqt(0, this);
+seqt::node seqt::nil() {
+    return node(0, this);
 }
 
 /* splay_remove
@@ -108,21 +108,21 @@ mem::seqt mem::nil() {
     rough top-to-bottom order of the tree so that removal doesn't 
     elevate elements like a typical splay would.
  */
-mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
-    mem::seqt_data * cur = get_data(root.id_);
+seqt::node seqt::splay_remove(seqt::node root, symbol c) {
+    seqt::seqt_data * cur = get_data(root.id_);
 
     if(cur == nullptr || cur->ordinality_ != unordered)
         return root;
 
     ident ret_id = 0;
-    mem::seqt_data * tmp = nullptr;
+    seqt::seqt_data * tmp = nullptr;
     ident * insert_point = &ret_id;
 
     /*      @        @ is new
            / \  <--- * is copied
           *   x      x is the new insertion point
      */
-    auto copy_left = [&](mem::seqt_data * l) { 
+    auto copy_left = [&](seqt::seqt_data * l) { 
         tie(*insert_point, tmp) = new_seqt(l->repr_, unordered);
         tmp->left_ = l->left_;
         tmp->right_ = 0;
@@ -133,7 +133,7 @@ mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
            / \  <--- * is copied
           x   *      x is the new insertion point
      */
-    auto copy_right = [&](mem::seqt_data * r) { 
+    auto copy_right = [&](seqt::seqt_data * r) { 
         tie(*insert_point, tmp) = new_seqt(r->repr_, unordered);
         tmp->right_ = r->right_;
         tmp->left_ = 0;
@@ -184,7 +184,7 @@ mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
             *insert_point = cur->right_;
         }
 
-        return seqt(ret_id, this);
+        return node(ret_id, this);
     }
 
     // we didn't find it, just return root
@@ -193,15 +193,15 @@ mem::seqt mem::splay_remove(mem::seqt root, symbol c) {
     return root;
 }
 
-// returns an unordered seqt which is 
-mem::seqt mem::splay_insert(mem::seqt root, symbol c) {
-    mem::seqt_data * cur = get_data(root.id_);
+// returns an unordered node which is 
+seqt::node seqt::splay_insert(seqt::node root, symbol c) {
+    seqt::seqt_data * cur = get_data(root.id_);
 
     ident ret_id;
-    mem::seqt_data * ret;
+    seqt::seqt_data * ret;
     tie(ret_id, ret) = new_seqt(c, unordered);
     if(cur == nullptr)
-        return seqt(ret_id, this);
+        return node(ret_id, this);
 
     // let's just create new nodes for now.  
     // maybe we can filter them later.
@@ -210,7 +210,7 @@ mem::seqt mem::splay_insert(mem::seqt root, symbol c) {
     ident * right_insert = &ret->right_;
 
     ident temp_id = root.id_;
-    mem::seqt_data * temp;
+    seqt::seqt_data * temp;
 
     while(cur != nullptr) {
         if(cur->ordinality_ != unordered) {
@@ -241,11 +241,11 @@ mem::seqt mem::splay_insert(mem::seqt root, symbol c) {
         }
     }
 
-    return seqt(ret_id, this);
+    return node(ret_id, this);
 }
 
-bool mem::find_in_unordered(mem::seqt root, symbol c) {
-    mem::seqt_data * cur = get_data(root.id_);
+bool seqt::find_in_unordered(seqt::node root, symbol c) {
+    seqt::seqt_data * cur = get_data(root.id_);
 
     while(cur != nullptr && cur->ordinality_ == unordered) {
         if(cur->repr_ < c)
@@ -259,58 +259,58 @@ bool mem::find_in_unordered(mem::seqt root, symbol c) {
     return false;
 }
 
-mem::seqt mem::create_ordered(mem::seqt prev, symbol c) {
+seqt::node seqt::create_ordered(seqt::node prev, symbol c) {
     ident id;
-    mem::seqt_data * temp;
+    seqt::seqt_data * temp;
     
     auto i = ordered_next_index_.find({prev.id_, c});
     if(i != ordered_next_index_.end())
-        return seqt(i->second, this);
+        return node(i->second, this);
 
-    mem::seqt_data * p = get_data(prev.id_);
+    seqt::seqt_data * p = get_data(prev.id_);
     tie(id, temp) = new_seqt(c, ordered);
     if(p == nullptr)
-        return seqt(id, this);
+        return node(id, this);
 
     temp->left_ = prev.id_;
     // add to the index
     ordered_next_index_.insert({{prev.id_, c}, id});
 
-    return seqt(id, this);
+    return node(id, this);
 }
 
-mem::seqt mem::create_unordered(mem::seqt prev, symbol c) {
-    seqt s = splay_insert(prev, c);
+seqt::node seqt::create_unordered(seqt::node prev, symbol c) {
+    node s = splay_insert(prev, c);
     if(s.is_nil()) {
         int id;
         seqt_data * data;
         tie(id, data) = new_seqt(c, unordered);
-        return seqt(id, this);
+        return node(id, this);
     }
     return s;
 }
 
-mem::seqt mem::create_ordered(symbol c) {
+seqt::node seqt::create_ordered(symbol c) {
     ident id;
     seqt_data * _;
     tie(id, _) = new_seqt(c, ordered);
-    return seqt(id, this);
+    return node(id, this);
 }
 
-mem::seqt mem::create_unordered(symbol c) {
+seqt::node seqt::create_unordered(symbol c) {
     ident id;
     seqt_data * _;
     tie(id, _) = new_seqt(c, unordered);
-    return seqt(id, this);
+    return node(id, this);
 }
 
-mem::seqt_data* mem::get_data(ident id) {
+seqt::seqt_data* seqt::get_data(ident id) {
     if(id >= data_.size()) return nullptr;
 
     return &data_.at(id);
 }
 
-tuple<mem::ident, mem::seqt_data*> mem::new_seqt(symbol c, ordinality ord) {
+tuple<seqt::ident, seqt::seqt_data*> seqt::new_seqt(symbol c, ordinality ord) {
     ident id;
     seqt_data * data;
 
@@ -344,18 +344,18 @@ tuple<mem::ident, mem::seqt_data*> mem::new_seqt(symbol c, ordinality ord) {
     return {id, data};
 }
 
-void mem::disregard(mem::thread t) {
+void seqt::disregard(seqt::thread t) {
     // TODO: implement me!
 }
 
-void mem::reinforce(mem::thread t) {
+void seqt::reinforce(seqt::thread t) {
     // TODO: implement me!
 
     threads_.push_back(t);
 }
 
 
-void mem::process_threads(std::function<void(thread&)> func) {
+void seqt::process_threads(std::function<void(thread&)> func) {
     //HACK: this is just to avoid all the hard work of modifying the threads as we iterate over them
     thread_container temp = threads_; // copy the threads and iterate over the copy
     threads_.clear(); // clear the threads so that they are ready to be added back
@@ -363,7 +363,7 @@ void mem::process_threads(std::function<void(thread&)> func) {
         func(*i);
 }
 
-void mem::read(uint32_t in) {
+void seqt::read(uint32_t in) {
     auto c = symbol(in);
 
     process_threads([c, this](thread & t) {

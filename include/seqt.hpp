@@ -34,25 +34,27 @@ struct symbol {
     symbol(uint32_t c) : character_code_(c) { }
 };
 
-class mem {
-    struct seqt;
+class seqt {
+public:
+
+    struct node;
     struct thread;
 
     typedef uint64_t ident;
 
-    friend struct seqt;
+    friend struct node;
 
     
     void process_threads(std::function<void(thread &)>);
     void reinforce(thread);
     void disregard(thread);
 
-    seqt nil();
+    node nil();
 
 public:
     void read(uint32_t c);
 
-private:
+public:
     typedef enum {
         ordered = 0,
         unordered = 1
@@ -61,21 +63,21 @@ private:
     struct seqt_data;
 
     struct seqt_less {
-        bool operator()(seqt const & a, seqt const & b) const;
+        bool operator()(node const & a, node const & b) const;
     };
 
     // uses the raw operations
-    seqt create_ordered(seqt prev, symbol c);
-    seqt create_ordered(symbol c);
-    seqt create_unordered(seqt prev, symbol c);
-    seqt create_unordered(symbol c);
+    node create_ordered(node prev, symbol c);
+    node create_ordered(symbol c);
+    node create_unordered(node prev, symbol c);
+    node create_unordered(symbol c);
 
-    bool find_in_unordered(seqt, symbol);
+    bool find_in_unordered(node, symbol);
 
-    seqt maximum_unordered(seqt);
+    node maximum_unordered(node);
     ident merge_unordered_ids(ident, ident);
-    seqt splay_insert(seqt, symbol);
-    seqt splay_remove(seqt, symbol);
+    node splay_insert(node, symbol);
+    node splay_remove(node, symbol);
 
     // raw operations
     seqt_data * get_data(ident);
@@ -98,12 +100,12 @@ private:
     std::map<tuple<ident,symbol>,ident> ordered_next_index_;
 
 public:
-    mem();
+    seqt();
 };
 
-struct mem::seqt {
-    friend mem::seqt_less;
-    friend mem;
+struct seqt::node {
+    friend seqt::seqt_less;
+    friend seqt;
 
     struct iterator;
     struct pointer;
@@ -113,45 +115,45 @@ struct mem::seqt {
 
     // iterator set_find(seqt const & s);
 
-    seqt append(symbol, bool default_ordered = true) const;
-    seqt remove(symbol) const;
+    node append(symbol, bool default_ordered = true) const;
+    node remove(symbol) const;
     symbol repr() const;
-    seqt expects(symbol);
+    node expects(symbol);
     bool is_ordered() const;
     bool is_unordered() const;
     bool is_nil() const;
 
     operator bool() const { return !is_nil(); }
-    bool operator==(seqt const &) const;
-private:
+    bool operator==(node const &) const;
+public:
     ident id_;
-    mem * owner_;
+    seqt * owner_;
 
-    seqt() : id_(0), owner_(nullptr) { }
-    seqt(mem * owner) : id_(0), owner_(owner) { }
-    seqt(ident id) : id_(id), owner_(nullptr) { }
-    seqt(ident id, mem * owner) : id_(id), owner_(owner) { }
+    node() : id_(0), owner_(nullptr) { }
+    node(seqt * owner) : id_(0), owner_(owner) { }
+    node(ident id) : id_(id), owner_(nullptr) { }
+    node(ident id, seqt * owner) : id_(id), owner_(owner) { }
 };
 
-struct mem::seqt_data {
+struct seqt::seqt_data {
     ordinality ordinality_;
     symbol repr_;
     ident left_;
     ident right_;
 };
 
-struct mem::thread {
+struct seqt::thread {
     bool advance(symbol);
 
-    seqt refers_to();
-    seqt visited(); // visited elements of the refers_to seqt
-    seqt unvisited(); // unvisited elements of the refers_to seqt
-private:
-    seqt visited_;
-    seqt unvisited_;
+    node refers_to();
+    node visited(); // visited elements of the refers_to seqt
+    node unvisited(); // unvisited elements of the refers_to seqt
 public:
-    thread(mem::seqt un) : visited_(0, un.owner_), unvisited_(un)  { }
-    thread(mem::seqt vis, mem::seqt un) : visited_(vis), unvisited_(un) { } 
+    node visited_;
+    node unvisited_;
+public:
+    thread(seqt::node un) : visited_(0, un.owner_), unvisited_(un)  { }
+    thread(seqt::node vis, seqt::node un) : visited_(vis), unvisited_(un) { } 
 };
 
 #endif // __SEQT_HPP__

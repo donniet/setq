@@ -7,6 +7,42 @@
 
 using std::string, std::cout, std::endl, std::stringstream;
 
+template<typename TESTS>
+int run_tests(TESTS & tests, int ac, char * av[]) {
+    bool all_succeeded = true;
+
+    auto run_all = [&]() {
+        for(auto j = tests.begin(); j != tests.end(); j++)
+            if(!j->second())
+                all_succeeded = false;
+    };
+
+    for(int i = 1; i < ac; i++) {
+        if(string("all") == av[i]) {
+            run_all();
+            continue;
+        }
+
+        auto j = tests.find(av[i]);
+        if(j == tests.end())
+            continue;
+
+        if(!j->second())
+            all_succeeded = false;
+    }
+
+    if(ac <= 1)
+        run_all();
+
+    if(all_succeeded) {
+        cout << "ALL TESTS SUCCEEDED" << endl;
+        return 0;
+    }
+    
+    cout << "TEST FAILED" << endl;
+    return -1;
+}
+
 struct test {
     bool successful;
     string name;

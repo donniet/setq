@@ -10,9 +10,10 @@ include(CTest)
 enable_testing()
 
 add_executable(test_splay test/test_splay.cpp)
-add_executable(seqt test/test_seqt.cpp src/seqt.cpp)
+add_executable(test_seqt test/test_seqt.cpp src/seqt.cpp)
 
 add_test(NAME test_splay COMMAND test_splay)
+add_test(NAME test_seqt COMMAND test_seqt)
 
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})

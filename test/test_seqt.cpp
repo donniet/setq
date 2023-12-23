@@ -1,28 +1,36 @@
 
 #include "seqt.hpp"
+#include "test.hpp"
+#include <map>
 
 #include <iostream> 
 
-using std::ostream, std::cout, std::endl, std::cerr;
+using std::ostream, std::cout, std::endl, std::cerr, std::map;
 
-void test_insert()
+test insert()
 {
+    test t("insert");
+
+    seqt m;
     
+
+    return t.success();
 }
 
-int main(int, char**) {
-    using std::cin;
+test unordered()
+{
+    test t("insert");
 
-    mem m;
+    seqt m;
 
-    const char * in = "ablkjasdrlkewjoasdigjierieoir2834rudkjfalksdhgj8q2934hrauisdjhfkasdjhf98234roiadsjsfa iu932r asdf ";
+    return t.success();
+}
 
-    for(int i = 0; i < strlen(in); i++) {
-        m.read(in[i]);
-    }
+int main(int ac, char** av) {
+    map<string, test(*)()> tests = {
+        {"insert", insert},
+        {"unordered", unordered},
+    };
 
-    while(cin) {
-        auto c = cin.get();
-        m.read(c);
-    }
+    return run_tests(tests, ac, av);
 }
