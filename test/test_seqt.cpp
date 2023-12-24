@@ -22,7 +22,29 @@ test unordered()
     test t("insert");
 
     seqt m;
+    seqt::node n = m.create_unordered('n');
+    n = m.splay_insert(n, 'm');
+    n = m.splay_insert(n, 'l');
+    if(!m.find_in_unordered(n, 'n')) {
+        return t.failure("could not find inserted symbol in unorderd node.");
+    }
+    if(m.find_in_unordered(n, 'q')) {
+        return t.failure("found non-inserted symbol in unordered node.");
+    }
+    if(!m.find_in_unordered(n, 'm')) {
+        return t.failure("could not find inserted symbol in unorderd node.");
+    }
+    if(!m.find_in_unordered(n, 'l')) {
+        return t.failure("could not find inserted symbol in unorderd node.");
+    }
 
+    seqt::node n1 = m.splay_remove(n, 'm');
+    if(m.find_in_unordered(n1, 'm'))
+        return t.failure("found a removed symbol in unordered node");
+
+    if(!m.find_in_unordered(n, 'm'))
+        return t.failure("could not find symbol in original node after we splay_removed");
+    
     return t.success();
 }
 

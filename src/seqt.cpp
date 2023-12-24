@@ -337,9 +337,8 @@ tuple<seqt::ident, seqt::seqt_data*> seqt::new_seqt(symbol c, ordinality ord) {
         data->repr_ = c;
     } else {
         id = next_id_++;
-        data = &*data_.insert(data_.begin() + id, seqt_data{
-            ord, c, 0, 0
-        }); 
+        data_[id] = seqt_data{ord, c, 0, 0};
+        data = &data_[id];
     }
     return {id, data};
 }
