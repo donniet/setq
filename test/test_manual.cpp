@@ -3,5 +3,7 @@
 
 
 int main(int ac, char * av[]) {
+    seqt s;
+    
     return 0;
 }
