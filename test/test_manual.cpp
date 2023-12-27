@@ -10,7 +10,7 @@ int main(int ac, char * av[]) {
     seqt s;
 
     while(cin) {
-        s.read(cin.get());
+        s.read((uint32_t)cin.get());
     }
 
     s.dump(cout);

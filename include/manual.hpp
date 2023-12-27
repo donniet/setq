@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iterator>
 #include <iostream>
+#include <iomanip>
 
 using std::list;
 using std::map;
@@ -187,13 +188,25 @@ ostream & seqt::dump(ostream & os) {
 
     map<node*, uint32_t> ids;
 
+    auto write_char = [&os](uint32_t c) {
+        if(c >= 33 && c <= 126) {
+            os << c;
+            return;
+        }
+        os << "\\u" << std::hex << std::setfill('0') << std::setw(4) << (uint16_t)c;
+    };
+
     for(node * n : nodes) {
         ids[n] = id++;
 
         os << "{\n";
+        os << "\t\"id\": " << ids[n] << "\n";
+        os << "\t\"weight\": " << n->weight << "\n";
         switch(n->type) {
         case atom:
-            os << "\t\"atom\": \"" << char(n->repr) << "\"\n";
+            os << "\t\"atom\": \"";
+            write_char(n->repr);
+            os << "\"\n";
             break;
         case sequence:
             os << "\t\"seq\": [";
