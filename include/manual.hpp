@@ -162,7 +162,7 @@ struct seqt {
     typedef set<node*,node_weight_less> node_set_type;
     typedef set<node*,node_weight_less>::iterator node_iterator;
 
-    void remove_node(node_iterator i);
+    void remove_node(node *);
     node_iterator make_atom(uint32_t s);
     node_iterator make_seq(node_iterator, node_iterator);
     node_iterator make_col(node_iterator, node_iterator);
@@ -250,15 +250,17 @@ seqt::node_iterator seqt::make_atom(uint32_t s) {
 
 seqt::~seqt() {
     // gross but functional deletion
-    for(auto i = nodes.begin(); i != nodes.end(); i++) {
-        remove_node(i);
+    auto temp = nodes; // copy it
+
+    for(auto i = temp.begin(); i != temp.end(); i++) {
+        remove_node(*i);
     }
+
+    temp.clear();
 }
 
 
-void seqt::remove_node(node_iterator i) {
-    node * n = *i;
-
+void seqt::remove_node(node * n) {
     // unlink n from any sequences that reference it
     for(auto j = n->in_seq.begin(); j != n->in_seq.end(); j++) {
         node * p;
@@ -280,7 +282,8 @@ void seqt::remove_node(node_iterator i) {
     }
 
     // now remove n from our list
-    nodes.erase(i);
+    nodes.erase(n);
+    // nodes.erase(i);
     delete n;
 }
 
