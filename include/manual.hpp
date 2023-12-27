@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <iterator>
+#include <iostream>
 
 using std::list;
 using std::map;
@@ -19,6 +20,7 @@ using std::get;
 using std::vector;
 using std::set_intersection;
 using std::inserter;
+using std::ostream;
 
 struct seqt {
     enum node_type {
@@ -170,6 +172,8 @@ struct seqt {
         set<node*> & visited, set<sequence_reference> & next_waiting_for,
         set<tuple<node_type, node*, node*>> & new_nodes);
 
+    ostream & dump(ostream & os);
+
     ~seqt();
 
     node_set_type nodes;
@@ -177,6 +181,45 @@ struct seqt {
     set<sequence_reference> waiting_for;
 
 };
+
+ostream & seqt::dump(ostream & os) {
+    uint32_t id = 0;
+
+    map<node*, uint32_t> ids;
+
+    for(node * n : nodes) {
+        ids[n] = id++;
+
+        os << "{\n";
+        switch(n->type) {
+        case atom:
+            os << "\t\"atom\": \"" << char(n->repr) << "\"\n";
+            break;
+        case sequence:
+            os << "\t\"seq\": [";
+            for(node * s : n->seq) {
+                if(!ids.contains(s))
+                    ids[s] = id++;
+                
+                os << ids[s] << ",";
+            }
+            os << "]\n";
+            break;
+        case collection:
+            os << "\t\"col\": [";
+            for(node * c : n->col) {
+                if(!ids.contains(c))
+                    ids[c] = id++;
+                
+                os << ids[c] << ",";
+            }
+            os << "]\n";
+            break;
+        }
+        os << "}\n";
+    }
+    return os;
+}
 
 seqt::node_iterator seqt::make_atom(uint32_t s) {
     auto a = atom_index.find(s);
