@@ -164,9 +164,11 @@ struct seqt {
     node_iterator make_seq(node_iterator, node_iterator);
     node_iterator make_col(node_iterator, node_iterator);
     void read(uint32_t);
+    bool is_duplicate(node_type, node * a, node * b);
     void read_node(
         vector<node*>::iterator this_one, vector<node*> & todo, 
-        set<node*> & visited, set<sequence_reference> next_waiting_for);
+        set<node*> & visited, set<sequence_reference> & next_waiting_for,
+        set<tuple<node_type, node*, node*>> & new_nodes);
 
     ~seqt();
 
@@ -230,33 +232,98 @@ void seqt::remove_node(node_iterator i) {
 void seqt::read(uint32_t s) {
     node_iterator ni = make_atom(s);
     node * atom_node = *ni;
-    atom_node->weight++; // increment this atom;
 
     set<node*> visited;
     set<sequence_reference> next_waiting_for;
     vector<node*> todo;
+    set<tuple<node_type, node*, node*>> new_nodes;
 
     todo.push_back(atom_node);
     vector<node*>::iterator cur = todo.begin();
-    vector<node*>::iterator last;
     
     while(cur != todo.end()) {
-        read_node(todo.begin(), todo, visited, next_waiting_for);
+        read_node(todo.begin(), todo, visited, next_waiting_for, new_nodes);
         cur++;
+    }
+
+    // go through all the new potential nodes and try and remove any duplicates before creating them
+    for(auto t : new_nodes) {
+        node_type typ;
+        node * a, * b;
+        tie(typ, a, b) = t;
+
+        if(!is_duplicate(typ, a, b)) {
+            node * c = new node();
+            c->type = typ;
+            c->append(a);
+            c->append(b);
+
+            nodes.insert(c);  // track our new node
+        }
     }
 
     waiting_for = next_waiting_for;
 }
 
+bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
+    if(typ == sequence) {
+        for(auto st : a->in_seq) {
+            node * s;
+            sequence_iterator si;
+            tie(s, si) = st;
+
+            // is si the at the begining?
+            if(si != s->seq.begin())
+                continue;
+        
+            // does b come after a?
+            si++;
+            if(si == s->seq.end() || *si != b) 
+                continue;
+
+            // is that the end?
+            si++;
+            if(si != s->seq.end())
+                continue;
+
+            // if we are still here then we already have a sequence of a and b
+            return true;
+        }
+    } else {
+        // collection
+        for(auto co : a->in_col) {
+            node * c;
+            collection_iterator ci;
+            tie(c, ci) = co;
+
+            // does this collection only have two things?
+            if(c->col.size() != 2) 
+                continue;
+
+            // are the two things a and b?
+            if(!c->col.contains(b))
+                continue;
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void seqt::read_node(
     vector<seqt::node*>::iterator this_one, vector<seqt::node*> & todo, 
-    set<seqt::node*> & visited, set<seqt::sequence_reference> next_waiting_for) 
+    set<seqt::node*> & visited, set<seqt::sequence_reference> & next_waiting_for,
+    set<tuple<seqt::node_type, seqt::node*, seqt::node*>> & new_nodes) 
 {
     node * n = *this_one;
 
     if(visited.contains(n)) 
         return;
     visited.insert(n);
+
+    n->weight++; // increment the weight of this node because we found it
+
 
     set<node*> potential_collections;
     set<sequence_reference> potential_sequences;
@@ -296,11 +363,31 @@ void seqt::read_node(
 
     // are any of these sequences ones we are waiting for?
     set<sequence_reference> matches;
-    set_intersection(
-        waiting_for.begin(), waiting_for.end(),
-        potential_sequences.begin(), potential_sequences.end(),
-        std::insert_iterator<set<sequence_reference>>(matches, matches.end())
-    );
+
+    for(auto p : potential_sequences) {
+        node * pn;
+        sequence_iterator psi;
+        tie(pn, psi) = p;
+
+        // is this in our waiting for?
+        if(waiting_for.contains(p)) {
+            // add it to our list of matches
+            matches.insert(p);
+            continue;
+        }
+        // otherwise, maybe we should be tracking these?
+        for(auto w : waiting_for) {
+            node * wn;
+            sequence_iterator wsi;
+            tie(wn, wsi) = w;
+
+            // perhaps we are missing a collection made from the two expected nodes
+            new_nodes.insert({collection, *psi, *wsi});
+            // or perhaps we are missing a sequence with this node and the node we are waiting for
+            new_nodes.insert({sequence, n, *wsi});
+            // TODO: think of other things?
+        }
+    }
 
     set<sequence_reference> matches_next;
     // now move all the matched ones forward one and check for end
