@@ -19,12 +19,34 @@ struct seqt {
     } node_type;
 
     struct node;
+    struct sequence_reference;
+
+    typedef list<node*>::iterator sequence_iterator;
+    typedef set<node*>::iterator collection_iterator;
 
     std::list<node*> nodes;
 
     typedef std::list<node*>::iterator node_iterator;
 
     void remove_node(node_iterator i);
+};
+
+struct seqt::sequence_reference 
+    : public tuple<node*, sequence_iterator>
+{
+    bool operator<(sequence_reference const & r) const {
+        return get<0>(*this) < get<0>(r);
+            return true;
+        if(get<0>(r) > get<0>(*this))
+            return false;
+        
+        // if the two nodes are equal, we will just compare the iterators
+        sequence_iterator i = get<1>(*this);
+        sequence_iterator j = get<1>(r);
+
+        if(i == j) return false;
+        return true;
+    }
 };
 
 struct seqt::node {
@@ -35,9 +57,6 @@ struct seqt::node {
     uint32_t repr;
     list<node*> seq;
     set<node*> col;
-
-    typedef list<node*>::iterator sequence_iterator;
-    typedef set<node*>::iterator collection_iterator;
 
     set<tuple<node*, sequence_iterator>> in_seq;
     map<node*, collection_iterator> in_col;
@@ -52,6 +71,8 @@ struct seqt::node {
         case collection:
             _append_collection(n);
             break;
+        case atom:
+            // error out here
         }
         //TODO: add a logic_error or something
     }
