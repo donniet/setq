@@ -47,6 +47,8 @@ struct seqt::sequence_reference
         if(i == j) return false;
         return true;
     }
+
+    sequence_reference(node* n, sequence_iterator i) : tuple<node*, sequence_iterator>({n, i}) { }
 };
 
 struct seqt::node {
@@ -58,7 +60,7 @@ struct seqt::node {
     list<node*> seq;
     set<node*> col;
 
-    set<tuple<node*, sequence_iterator>> in_seq;
+    set<sequence_reference> in_seq;
     map<node*, collection_iterator> in_col;
 
     node() : type(atom), weight(0), repr(0) { }
@@ -73,6 +75,7 @@ struct seqt::node {
             break;
         case atom:
             // error out here
+            break;
         }
         //TODO: add a logic_error or something
     }
@@ -81,7 +84,7 @@ struct seqt::node {
         // append n to the sequence
         sequence_iterator pos = seq.insert(seq.end(), n);
         // let n know where it is appended in our sequence
-        n->in_seq.insert({this, pos});
+        n->in_seq.insert(sequence_reference(this, pos));
     }
 
     void _append_collection(node * n) {
@@ -101,7 +104,7 @@ void seqt::remove_node(node_iterator i) {
     // unlink n from any sequences that reference it
     for(auto j = n->in_seq.begin(); j != n->in_seq.end(); j++) {
         node * p;
-        node::sequence_iterator k;
+        sequence_iterator k;
         tie(p, k) = *j;
 
         // should we replace it with a collection of all the collections that n is in maybe?
@@ -112,7 +115,7 @@ void seqt::remove_node(node_iterator i) {
     // unlink n from any collections that reference it
     for(auto j = n->in_col.begin(); j != n->in_col.end(); j++) {
         node * p = j->first;
-        node::collection_iterator k = j->second;
+        collection_iterator k = j->second;
 
         // should we replace it with a collection that n is in, or a collection of all the collections?
         p->col.erase(k);
