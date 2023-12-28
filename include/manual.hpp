@@ -32,27 +32,23 @@ struct seqt {
     struct sequence_reference;
     struct node_weight_less;
 
-    typedef vector<node*>::iterator sequence_iterator;
+    typedef list<node*>::iterator sequence_iterator;
     typedef set<node*>::iterator collection_iterator;
 
     struct sequence_reference
-        : public tuple<node*, sequence_iterator>
+        : public tuple<node*, sequence_iterator, size_t>
     {
         bool operator<(sequence_reference const & r) const {
             return get<0>(*this) < get<0>(r);
                 return true;
             if(get<0>(r) > get<0>(*this))
                 return false;
-            
-            // if the two nodes are equal, we will just compare the iterators
-            sequence_iterator i = get<1>(*this);
-            sequence_iterator j = get<1>(r);
 
-            return i < j; // we can do this because these are vector iterators
+            return get<2>(*this) < get<2>(r);
         }
 
-        sequence_reference(node* n, sequence_iterator i) 
-            : tuple<node*, sequence_iterator>({n, i}) 
+        sequence_reference(node* n, sequence_iterator i, size_t p) 
+            : tuple<node*, sequence_iterator, size_t>({n, i, p}) 
         { }
     };
 
@@ -62,7 +58,7 @@ struct seqt {
         size_t weight;
 
         uint32_t repr;
-        vector<node*> seq;
+        list<node*> seq;
         set<node*> col;
 
         set<sequence_reference> in_seq;
@@ -136,7 +132,7 @@ struct seqt {
             // append n to the sequence
             sequence_iterator pos = seq.insert(seq.end(), n);
             // let n know where it is appended in our sequence
-            n->in_seq.insert(sequence_reference(this, pos));
+            n->in_seq.insert(sequence_reference(this, pos, in_seq.size()));
         }
 
         void _append_collection(node * n) {
@@ -194,11 +190,13 @@ ostream & seqt::dump(ostream & os) {
             os << (char)c;
             return;
         }
-        os << "\\u" << std::hex << std::setfill('0') << std::setw(4) << (uint16_t)c;
+        os << "\\u" << std::hex << std::setfill('0') << std::setw(4) << (uint16_t)c << std::dec;
     };
 
+    os << "[\n";
     for(node * n : nodes) {
         ids[n] = id++;
+        bool first = true;
 
         os << "{\n";
         os << "\t\"id\": " << ids[n] << "\n";
@@ -211,27 +209,35 @@ ostream & seqt::dump(ostream & os) {
             break;
         case sequence:
             os << "\t\"seq\": [";
+            first = true;
             for(node * s : n->seq) {
+                if(first) first = false;
+                else os << ",";
                 if(!ids.contains(s))
                     ids[s] = id++;
                 
-                os << ids[s] << ",";
+                os << ids[s];
             }
             os << "]\n";
             break;
         case collection:
             os << "\t\"col\": [";
+            first = true;
             for(node * c : n->col) {
+                if(first) first = false;
+                else os << ",";
+
                 if(!ids.contains(c))
                     ids[c] = id++;
                 
-                os << ids[c] << ",";
+                os << ids[c];
             }
             os << "]\n";
             break;
         }
         os << "}\n";
     }
+    os << "]\n";
     return os;
 }
 
@@ -266,7 +272,8 @@ void seqt::remove_node(node * n) {
     for(auto j = n->in_seq.begin(); j != n->in_seq.end(); j++) {
         node * p;
         sequence_iterator k;
-        tie(p, k) = *j;
+        size_t pos;
+        tie(p, k, pos) = *j;
 
         // should we replace it with a collection of all the collections that n is in maybe?
         // so many possibilities...
@@ -335,7 +342,8 @@ bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
         for(auto st : a->in_seq) {
             node * s;
             sequence_iterator si;
-            tie(s, si) = st;
+            size_t pos;
+            tie(s, si, pos) = st;
 
             // is si the at the begining?
             if(si != s->seq.begin())
@@ -408,12 +416,13 @@ void seqt::read_node(
         for(auto seqj = n->in_seq.begin(); seqj != n->in_seq.end(); seqj++) {
             node * s;
             sequence_iterator si;
-            tie(s, si) = *seqj;
+            size_t pos;
+            tie(s, si, pos) = *seqj;
 
             set<sequence_reference>::iterator _;
             bool ins;
             
-            tie(_, ins) = potential_sequences.insert(sequence_reference(s, si));
+            tie(_, ins) = potential_sequences.insert(sequence_reference(s, si, pos));
             inserted = (inserted || ins);
         }
         return inserted;
@@ -432,7 +441,8 @@ void seqt::read_node(
     for(auto p : potential_sequences) {
         node * pn;
         sequence_iterator psi;
-        tie(pn, psi) = p;
+        size_t pos;
+        tie(pn, psi, pos) = p;
 
         // is this in our waiting for?
         if(waiting_for.contains(p)) {
@@ -444,7 +454,8 @@ void seqt::read_node(
         for(auto w : waiting_for) {
             node * wn;
             sequence_iterator wsi;
-            tie(wn, wsi) = w;
+            size_t pos;
+            tie(wn, wsi, pos) = w;
 
             // perhaps we are missing a collection made from the two expected nodes
             new_nodes.insert({collection, *psi, *wsi});
@@ -459,7 +470,8 @@ void seqt::read_node(
     for(auto p : matches) {
         node * n;
         sequence_iterator si;
-        tie(n, si) = p;
+        size_t pos;
+        tie(n, si, pos) = p;
 
         ++si;
         if(si == n->seq.end()) {
@@ -468,7 +480,7 @@ void seqt::read_node(
             todo.push_back(n);
         } else {
             // otherwise add this to the potential sequences we are still waiting on
-            next_waiting_for.insert(sequence_reference(n, si));
+            next_waiting_for.insert(sequence_reference(n, si, pos));
         }
     }
 }
