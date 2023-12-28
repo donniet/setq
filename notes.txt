@@ -1,4 +1,11 @@
+## test_splay
 * test splay insert/remove
 * add weighted reinforement
 * use weights to disregard
 * test out garbage collection
+
+
+## test_manual
+* work on creating new sequences (beyond just pairs)
+* test out garbage collection based on weight
+* read in a lot of text (alice_1.txt) and see what patterns come out
