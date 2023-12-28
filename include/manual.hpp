@@ -36,7 +36,7 @@ struct seqt {
     typedef set<node*>::iterator collection_iterator;
 
     struct sequence_reference
-        : public tuple<node*, sequence_iterator, size_t>
+        : public tuple<node*, sequence_iterator>
     {
         bool operator<(sequence_reference const & r) const {
             return get<0>(*this) < get<0>(r);
@@ -44,11 +44,11 @@ struct seqt {
             if(get<0>(r) > get<0>(*this))
                 return false;
 
-            return get<2>(*this) < get<2>(r);
+            return get<1>(*this) != get<1>(r);
         }
 
-        sequence_reference(node* n, sequence_iterator i, size_t p) 
-            : tuple<node*, sequence_iterator, size_t>({n, i, p}) 
+        sequence_reference(node* n, sequence_iterator i) 
+            : tuple<node*, sequence_iterator>({n, i}) 
         { }
     };
 
@@ -132,7 +132,7 @@ struct seqt {
             // append n to the sequence
             sequence_iterator pos = seq.insert(seq.end(), n);
             // let n know where it is appended in our sequence
-            n->in_seq.insert(sequence_reference(this, pos, in_seq.size()));
+            n->in_seq.insert(sequence_reference(this, pos));
         }
 
         void _append_collection(node * n) {
@@ -272,8 +272,7 @@ void seqt::remove_node(node * n) {
     for(auto j = n->in_seq.begin(); j != n->in_seq.end(); j++) {
         node * p;
         sequence_iterator k;
-        size_t pos;
-        tie(p, k, pos) = *j;
+        tie(p, k) = *j;
 
         // should we replace it with a collection of all the collections that n is in maybe?
         // so many possibilities...
@@ -342,8 +341,7 @@ bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
         for(auto st : a->in_seq) {
             node * s;
             sequence_iterator si;
-            size_t pos;
-            tie(s, si, pos) = st;
+            tie(s, si) = st;
 
             // is si the at the begining?
             if(si != s->seq.begin())
@@ -397,7 +395,6 @@ void seqt::read_node(
 
     n->weight++; // increment the weight of this node because we found it
 
-
     set<node*> potential_collections;
     set<sequence_reference> potential_sequences;
 
@@ -416,13 +413,12 @@ void seqt::read_node(
         for(auto seqj = n->in_seq.begin(); seqj != n->in_seq.end(); seqj++) {
             node * s;
             sequence_iterator si;
-            size_t pos;
-            tie(s, si, pos) = *seqj;
+            tie(s, si) = *seqj;
 
             set<sequence_reference>::iterator _;
             bool ins;
             
-            tie(_, ins) = potential_sequences.insert(sequence_reference(s, si, pos));
+            tie(_, ins) = potential_sequences.insert(sequence_reference(s, si));
             inserted = (inserted || ins);
         }
         return inserted;
@@ -441,8 +437,7 @@ void seqt::read_node(
     for(auto p : potential_sequences) {
         node * pn;
         sequence_iterator psi;
-        size_t pos;
-        tie(pn, psi, pos) = p;
+        tie(pn, psi) = p;
 
         // is this in our waiting for?
         if(waiting_for.contains(p)) {
@@ -454,8 +449,7 @@ void seqt::read_node(
         for(auto w : waiting_for) {
             node * wn;
             sequence_iterator wsi;
-            size_t pos;
-            tie(wn, wsi, pos) = w;
+            tie(wn, wsi) = w;
 
             // perhaps we are missing a collection made from the two expected nodes
             new_nodes.insert({collection, *psi, *wsi});
@@ -470,8 +464,7 @@ void seqt::read_node(
     for(auto p : matches) {
         node * n;
         sequence_iterator si;
-        size_t pos;
-        tie(n, si, pos) = p;
+        tie(n, si) = p;
 
         ++si;
         if(si == n->seq.end()) {
@@ -480,7 +473,7 @@ void seqt::read_node(
             todo.push_back(n);
         } else {
             // otherwise add this to the potential sequences we are still waiting on
-            next_waiting_for.insert(sequence_reference(n, si, pos));
+            next_waiting_for.insert(sequence_reference(n, si));
         }
     }
 }
