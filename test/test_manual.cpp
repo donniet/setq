@@ -20,7 +20,7 @@ int main(int ac, char * av[]) {
         }
     } else {
         // test mode
-        string test = "blah";
+        string test = "blbl";
 
         for(char c : test) {
             s.read(c);

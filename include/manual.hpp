@@ -165,7 +165,7 @@ struct seqt {
     void read(uint32_t);
     bool is_duplicate(node_type, node * a, node * b);
     void read_node(
-        vector<node*>::iterator this_one, vector<node*> & todo,
+        node * this_one, list<node*> & todo,
         set<node*> & visited, set<sequence_reference> & next_waiting_for,
         set<tuple<node_type, node*, node*>> & new_nodes);
 
@@ -176,7 +176,7 @@ struct seqt {
     node_set_type nodes;
     map<uint32_t,node_iterator> atom_index;
     set<sequence_reference> waiting_for;
-    vector<node*> completed;
+    list<node*> completed;
 
 };
 
@@ -301,14 +301,14 @@ void seqt::read(uint32_t s) {
 
     set<node*> visited;
     set<sequence_reference> next_waiting_for;
-    vector<node*> todo;
+    list<node*> todo;
     set<tuple<node_type, node*, node*>> new_nodes;
 
     todo.push_back(atom_node);
-    vector<node*>::iterator cur = todo.begin();
+    list<node*>::iterator cur = todo.begin();
     
     while(cur != todo.end()) {
-        read_node(todo.begin(), todo, visited, next_waiting_for, new_nodes);
+        read_node(*cur, todo, visited, next_waiting_for, new_nodes);
         cur++;
     }
 
@@ -327,6 +327,7 @@ void seqt::read(uint32_t s) {
             c->type = typ;
             c->append(a);
             c->append(b);
+            c->weight = 1;
 
             nodes.insert(c);  // track our new node
         }
@@ -335,6 +336,78 @@ void seqt::read(uint32_t s) {
     completed = todo;
     waiting_for = next_waiting_for;
 }
+
+void seqt::read_node(
+    node * n, list<seqt::node*> & todo,
+    set<seqt::node*> & visited, set<seqt::sequence_reference> & next_waiting_for,
+    set<tuple<seqt::node_type, seqt::node*, seqt::node*>> & new_nodes) 
+{
+    if(visited.contains(n)) 
+        return;
+    visited.insert(n);
+
+    n->weight++; // increment the weight of this node because we found it
+
+    set<node*> potential_collections;
+    set<sequence_reference> potential_sequences;
+
+    // get all the collections that this node is in
+    for(auto p : n->in_col) {
+        node * c;
+        collection_iterator ci;
+        tie(c, ci) = p;
+        c->weight++; // increment this collection
+        
+        potential_collections.insert(c);
+    }
+
+    // now find any sequences that contain these collections, or the node itself
+    // these reference the position of this node, so if it's at the beggining then we can ignore it
+    potential_sequences.insert(n->in_seq.begin(), n->in_seq.end());
+    for(node * col : potential_collections) {   
+        potential_sequences.insert(col->in_seq.begin(), col->in_seq.end());
+    }
+
+    for(auto p : potential_sequences) {
+        node * pn;
+        sequence_iterator psi, psn;
+        tie(pn, psn) = p;
+        psi = psn++; 
+
+        // this symbol is right at the beginning so add it to the next_waiting_for
+        if(pn->seq.begin() == psi) {
+            next_waiting_for.insert(sequence_reference(pn, psn));
+            continue;
+        }
+
+        // is this in our waiting for?
+        if(waiting_for.contains(p)) {
+            // add it to our list of matches
+            if(psn == pn->seq.end()) {
+                todo.push_back(pn);
+            } else {
+                next_waiting_for.insert(sequence_reference(pn, psn));
+            }
+            continue;
+        }
+        
+        // otherwise, maybe we should be tracking these?
+        for(auto w : waiting_for) {
+            node * wn;
+            sequence_iterator wsi;
+            tie(wn, wsi) = w;
+
+            // perhaps we are missing a collection made from the two expected nodes
+            new_nodes.insert({collection, *psi, *wsi});
+            // or perhaps we are missing a sequence with this node and the node we are waiting for
+            new_nodes.insert({sequence, *psi, *wsi});
+            // TODO: think of other things?
+        }
+    }
+
+    
+}
+
 
 bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
     if(typ == sequence) {
@@ -382,101 +455,6 @@ bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
     return false;
 }
 
-void seqt::read_node(
-    vector<seqt::node*>::iterator this_one, vector<seqt::node*> & todo,
-    set<seqt::node*> & visited, set<seqt::sequence_reference> & next_waiting_for,
-    set<tuple<seqt::node_type, seqt::node*, seqt::node*>> & new_nodes) 
-{
-    node * n = *this_one;
-
-    if(visited.contains(n)) 
-        return;
-    visited.insert(n);
-
-    n->weight++; // increment the weight of this node because we found it
-
-    set<node*> potential_collections;
-    set<sequence_reference> potential_sequences;
-
-    // get all the collections that this node is in
-    for(auto p : n->in_col) {
-        node * c;
-        collection_iterator ci;
-        tie(c, ci) = p;
-        c->weight++; // increment this collection
-        
-        potential_collections.insert(c);
-    }
-
-    auto find_sequences = [&](node * n) -> bool {
-        bool inserted = false;
-        for(auto seqj = n->in_seq.begin(); seqj != n->in_seq.end(); seqj++) {
-            node * s;
-            sequence_iterator si;
-            tie(s, si) = *seqj;
-
-            set<sequence_reference>::iterator _;
-            bool ins;
-            
-            tie(_, ins) = potential_sequences.insert(sequence_reference(s, si));
-            inserted = (inserted || ins);
-        }
-        return inserted;
-    };
-
-    // now find any sequences that contain these collections, or the node itself
-    bool found = find_sequences(n);
-    for(node * col : potential_collections) {
-        bool found_col = find_sequences(col);
-        found = (found || found_col);
-    }
-
-    // are any of these sequences ones we are waiting for?
-    set<sequence_reference> matches;
-
-    for(auto p : potential_sequences) {
-        node * pn;
-        sequence_iterator psi;
-        tie(pn, psi) = p;
-
-        // is this in our waiting for?
-        if(waiting_for.contains(p)) {
-            // add it to our list of matches
-            matches.insert(p);
-            continue;
-        }
-        // otherwise, maybe we should be tracking these?
-        for(auto w : waiting_for) {
-            node * wn;
-            sequence_iterator wsi;
-            tie(wn, wsi) = w;
-
-            // perhaps we are missing a collection made from the two expected nodes
-            new_nodes.insert({collection, *psi, *wsi});
-            // or perhaps we are missing a sequence with this node and the node we are waiting for
-            new_nodes.insert({sequence, n, *wsi});
-            // TODO: think of other things?
-        }
-    }
-
-    set<sequence_reference> matches_next;
-    // now move all the matched ones forward one and check for end
-    for(auto p : matches) {
-        node * n;
-        sequence_iterator si;
-        tie(n, si) = p;
-
-        ++si;
-        if(si == n->seq.end()) {
-            // we've completed this sequence and now need to look for 
-            // add this node to or to_do list
-            todo.push_back(n);
-        } else {
-            // otherwise add this to the potential sequences we are still waiting on
-            next_waiting_for.insert(sequence_reference(n, si));
-        }
-    }
-}
 
 
 
