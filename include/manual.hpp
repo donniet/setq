@@ -180,67 +180,6 @@ struct seqt {
 
 };
 
-ostream & seqt::dump(ostream & os) {
-    uint32_t id = 0;
-
-    map<node*, uint32_t> ids;
-
-    auto write_char = [&os](uint32_t c) {
-        if(c >= 33 && c <= 126) {
-            os << (char)c;
-            return;
-        }
-        os << "\\u" << std::hex << std::setfill('0') << std::setw(4) << (uint16_t)c << std::dec;
-    };
-
-    os << "[\n";
-    for(node * n : nodes) {
-        ids[n] = id++;
-        bool first = true;
-
-        os << "{\n";
-        os << "\t\"id\": " << ids[n] << "\n";
-        os << "\t\"weight\": " << n->weight << "\n";
-        switch(n->type) {
-        case atom:
-            os << "\t\"atom\": \"";
-            write_char(n->repr);
-            os << "\"\n";
-            break;
-        case sequence:
-            os << "\t\"seq\": [";
-            first = true;
-            for(node * s : n->seq) {
-                if(first) first = false;
-                else os << ",";
-                if(!ids.contains(s))
-                    ids[s] = id++;
-                
-                os << ids[s];
-            }
-            os << "]\n";
-            break;
-        case collection:
-            os << "\t\"col\": [";
-            first = true;
-            for(node * c : n->col) {
-                if(first) first = false;
-                else os << ",";
-
-                if(!ids.contains(c))
-                    ids[c] = id++;
-                
-                os << ids[c];
-            }
-            os << "]\n";
-            break;
-        }
-        os << "}\n";
-    }
-    os << "]\n";
-    return os;
-}
-
 seqt::node_iterator seqt::make_atom(uint32_t s) {
     auto a = atom_index.find(s);
     if(a != atom_index.end())
@@ -404,8 +343,6 @@ void seqt::read_node(
             // TODO: think of other things?
         }
     }
-
-    
 }
 
 
@@ -454,6 +391,69 @@ bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
 
     return false;
 }
+
+
+ostream & seqt::dump(ostream & os) {
+    uint32_t id = 0;
+
+    map<node*, uint32_t> ids;
+
+    auto write_char = [&os](uint32_t c) {
+        if(c >= 33 && c <= 126) {
+            os << (char)c;
+            return;
+        }
+        os << "\\u" << std::hex << std::setfill('0') << std::setw(4) << (uint16_t)c << std::dec;
+    };
+
+    os << "[\n";
+    for(node * n : nodes) {
+        ids[n] = id++;
+        bool first = true;
+
+        os << "{\n";
+        os << "\t\"id\": " << ids[n] << "\n";
+        os << "\t\"weight\": " << n->weight << "\n";
+        switch(n->type) {
+        case atom:
+            os << "\t\"atom\": \"";
+            write_char(n->repr);
+            os << "\"\n";
+            break;
+        case sequence:
+            os << "\t\"seq\": [";
+            first = true;
+            for(node * s : n->seq) {
+                if(first) first = false;
+                else os << ",";
+                if(!ids.contains(s))
+                    ids[s] = id++;
+                
+                os << ids[s];
+            }
+            os << "]\n";
+            break;
+        case collection:
+            os << "\t\"col\": [";
+            first = true;
+            for(node * c : n->col) {
+                if(first) first = false;
+                else os << ",";
+
+                if(!ids.contains(c))
+                    ids[c] = id++;
+                
+                os << ids[c];
+            }
+            os << "]\n";
+            break;
+        }
+        os << "}\n";
+    }
+    os << "]\n";
+    return os;
+}
+
 
 
 
