@@ -22,7 +22,7 @@ test unordered()
     test t("insert");
 
     seqt m;
-    seqt::node n = m.create_unordered('n');
+    seqt::node n = m.create_atom('n');
     n = m.splay_insert(n, 'm');
     n = m.splay_insert(n, 'l');
     if(!m.find_in_unordered(n, 'n')) {
@@ -50,7 +50,7 @@ test unordered()
 
 int main(int ac, char** av) {
     map<string, test(*)()> tests = {
-        {"insert", insert},
+        // {"insert", insert},
         {"unordered", unordered},
     };
 

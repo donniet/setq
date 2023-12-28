@@ -68,9 +68,10 @@ public:
 
     // uses the raw operations
     node create_ordered(node prev, symbol c);
-    node create_ordered(symbol c);
     node create_unordered(node prev, symbol c);
-    node create_unordered(symbol c);
+    // node create_ordered(symbol c);
+    // node create_unordered(symbol c);
+    node create_atom(symbol c);
 
     bool find_in_unordered(node, symbol);
 
@@ -93,8 +94,8 @@ public:
     ident next_id_;
 
     // indexes
-    std::map<symbol, ident> unordered_atom_index_;
-    std::map<symbol, ident> ordered_atom_index_;
+    // std::map<symbol, ident> unordered_atom_index_;
+    std::map<symbol, ident> atom_index_;
     // std::map<ident, symbol> symbol_index_;
 
     std::map<tuple<ident,symbol>,ident> ordered_next_index_;
@@ -115,12 +116,13 @@ struct seqt::node {
 
     // iterator set_find(seqt const & s);
 
-    node append(symbol, bool default_ordered = true) const;
+    node append(symbol, ordinality if_atomic) const;
     node remove(symbol) const;
     symbol repr() const;
     node expects(symbol);
     bool is_ordered() const;
     bool is_unordered() const;
+    bool is_atom() const; 
     bool is_nil() const;
 
     operator bool() const { return !is_nil(); }
@@ -131,7 +133,6 @@ public:
 
     node() : id_(0), owner_(nullptr) { }
     node(seqt * owner) : id_(0), owner_(owner) { }
-    node(ident id) : id_(id), owner_(nullptr) { }
     node(ident id, seqt * owner) : id_(id), owner_(owner) { }
 };
 

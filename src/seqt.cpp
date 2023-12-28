@@ -1,5 +1,11 @@
 #include "seqt.hpp"
 
+symbol seqt::node::repr() const {
+    seqt_data * data = owner_->get_data(id_);
+    if(data == nullptr) return symbol(0);
+
+    return data->repr_;
+}
 
 seqt::node seqt::node::remove(symbol c) const {
     seqt_data * data = owner_->get_data(id_);
@@ -20,12 +26,26 @@ seqt::node seqt::node::remove(symbol c) const {
 
 seqt::node seqt::node::expects(symbol c) {
     seqt_data * data = owner_->get_data(id_);
-    if(data == nullptr) return false;
+    if(data == nullptr) 
+        return owner_->nil();
+    
+    if(is_nil())
+        return owner_->nil();
+
+    // atoms shouldn't expect anything
+    // or should expect everything...
+    // we should check for atomic before calling expects
+    if(is_atom())
+        owner_->nil();
 
     if(data->ordinality_ == unordered) {
         // if we are unordered, then we expect something that we haven't already seen
-        return !owner_->find_in_unordered(*this, c);
+        if(owner_->find_in_unordered(*this, c))
+            return owner_->nil();
+       
+        return owner_->splay_insert(*this, c);
     }
+
 
     // if we are unordered, then we should see if c 
     // we need to look through all the node's that have c as a repr_
@@ -43,23 +63,53 @@ seqt::node seqt::node::expects(symbol c) {
     return node(0, owner_);
 }
 
+bool seqt::node::is_atom() const {
+    seqt_data * data = owner_->get_data(id_);
+
+    if(data == nullptr) 
+        return false;
+
+    // unordered nodes can have zero left and right pointers
+    return data->ordinality_ == ordered 
+        && data->left_ == 0 
+        && data->right_ == 0;
+}
+
 bool seqt::node::is_ordered() const {
     seqt_data * data = owner_->get_data(id_);
     if(data == nullptr) return false;
 
-    return data->ordinality_ == ordered;
+    return !is_atom() && data->ordinality_ == ordered;
 }
 
-seqt::node seqt::node::append(symbol c, bool default_ordered) const {
-    if(is_nil()) {
-        if(default_ordered) return owner_->create_ordered(c);
-        return owner_->create_unordered(c);
-    }
-    if(is_ordered()) return owner_->create_ordered(*this, c);
-    return owner_->create_unordered(*this, c);
+bool seqt::node::is_unordered() const {
+    seqt_data * data = owner_->get_data(id_);
+    if(data == nullptr) return false;
+
+    return !is_atom() && data->ordinality_ == unordered;
 }
 
 bool seqt::node::is_nil() const { return id_ == 0; }
+
+
+seqt::node seqt::node::append(symbol c, ordinality if_atomic) const {
+    if(is_nil())
+        return owner_->create_atom(c);
+
+    if(is_atom()) 
+        switch(if_atomic) {
+        case ordered:
+            return owner_->create_ordered(*this, c);
+        case unordered:
+            return owner_->create_unordered(*this, c);
+        }
+    
+    if(is_ordered()) 
+        return owner_->create_ordered(*this, c);
+
+    return owner_->create_unordered(*this, c);
+}
+
 
 
 bool seqt::node::operator==(node const & a) const {
@@ -73,13 +123,14 @@ bool seqt::seqt_less::operator()(seqt::node const & a, seqt::node const & b) con
     return false;
 }
 
+// don't call this on atoms, I think...
 bool seqt::thread::advance(symbol c) {
     if(!unvisited().expects(c)) {
         return false;
     }
 
     // move this thread forward
-    visited() = visited().append(c);
+    visited() = visited().append(c, ordered); // ensure that if visited is nil we create an atom
     unvisited() = unvisited().remove(c);
     return true;
 }
@@ -118,28 +169,6 @@ seqt::node seqt::splay_remove(seqt::node root, symbol c) {
     seqt::seqt_data * tmp = nullptr;
     ident * insert_point = &ret_id;
 
-    /*      @        @ is new
-           / \  <--- * is copied
-          *   x      x is the new insertion point
-     */
-    auto copy_left = [&](seqt::seqt_data * l) { 
-        tie(*insert_point, tmp) = new_seqt(l->repr_, unordered);
-        tmp->left_ = l->left_;
-        tmp->right_ = 0;
-        insert_point = &tmp->right_;
-    };
-
-    /*      @        @ is new
-           / \  <--- * is copied
-          x   *      x is the new insertion point
-     */
-    auto copy_right = [&](seqt::seqt_data * r) { 
-        tie(*insert_point, tmp) = new_seqt(r->repr_, unordered);
-        tmp->right_ = r->right_;
-        tmp->left_ = 0;
-        insert_point = &tmp->left_;    
-    };
-    
     bool found = false;
 
     while(cur != nullptr) {
@@ -290,17 +319,10 @@ seqt::node seqt::create_unordered(seqt::node prev, symbol c) {
     return s;
 }
 
-seqt::node seqt::create_ordered(symbol c) {
+seqt::node seqt::create_atom(symbol c) {
     ident id;
     seqt_data * _;
-    tie(id, _) = new_seqt(c, ordered);
-    return node(id, this);
-}
-
-seqt::node seqt::create_unordered(symbol c) {
-    ident id;
-    seqt_data * _;
-    tie(id, _) = new_seqt(c, unordered);
+    tie(id, _) = new_seqt(c, ordered); // atoms are considered ordered
     return node(id, this);
 }
 
@@ -314,18 +336,10 @@ tuple<seqt::ident, seqt::seqt_data*> seqt::new_seqt(symbol c, ordinality ord) {
     ident id;
     seqt_data * data;
 
-    switch(ord) {
-    case ordered:
-        // use a for loop for scope
-        for(auto i = ordered_atom_index_.find(c); i != ordered_atom_index_.end();)
-            return {i->second, &data_[i->second]};
-        break;
-    case unordered:
-        for(auto i = unordered_atom_index_.find(c); i != unordered_atom_index_.end();)
-            return {i->second, &data_[i->second]};
-        break;
-    }
-
+    auto i = atom_index_.find(c); 
+    if(i != atom_index_.end())
+        return {i->second, &data_[i->second]};
+    
     if(!recycled_.empty()) {
         id = recycled_.back();
         recycled_.pop_back();
@@ -340,6 +354,9 @@ tuple<seqt::ident, seqt::seqt_data*> seqt::new_seqt(symbol c, ordinality ord) {
         data_[id] = seqt_data{ord, c, 0, 0};
         data = &data_[id];
     }
+
+    // atom_index_.insert({c, id});
+    atom_index_[c] = id;
     return {id, data};
 }
 
@@ -366,15 +383,22 @@ void seqt::read(uint32_t in) {
     auto c = symbol(in);
 
     process_threads([c, this](thread & t) {
-        if(t.advance(c)) {
+        if(t.unvisited().is_atom()) {
+            // if we are atomic, we only care if our representations match
+            if(t.unvisited().repr() == c) {
+                reinforce(t); // reinforce the atom!
+            } 
+        }
+        else if(t.advance(c)) {
+            // if we advance this thread, reinforce it
             reinforce(t);
         } 
         else {
+            // otherwise disregard
             disregard(t);                                // disregard this since it didn't expect this symbol
-            reinforce(thread(t.visited().append(c)));    // but start a new thread by appending the found symbol 
+            reinforce(thread(t.visited().append(c, ordered)));    // but start a new thread by appending the found symbol 
                                                          // onto the visited elements
         }
     });
-    reinforce(thread(create_ordered(c), nil()));
-    reinforce(thread(create_unordered(c), nil()));
+    reinforce(thread(create_atom(c), nil()));
 }

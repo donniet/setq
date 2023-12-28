@@ -38,7 +38,7 @@ struct seqt_entry {
     }
 };
 
-struct mem {
+struct seqt {
     std::shared_mutex read_mutex;
     std::condition_variable_any cv;
 
@@ -73,7 +73,7 @@ struct mem {
     int do_calculate_charges(identifier id);
 };
 
-int mem::do_calculate_charges(identifier id) {
+int seqt::do_calculate_charges(identifier id) {
     auto repr = data_[id].repr;
 
     int ret = 0;
@@ -106,7 +106,7 @@ int mem::do_calculate_charges(identifier id) {
     }
 }
 
-void mem::think(identifier modulus, identifier remainder) {
+void seqt::think(identifier modulus, identifier remainder) {
     std::shared_lock<std::shared_mutex> shared_lock(read_mutex);
     size_t my_symbols_read = symbols_read;
     stage my_stage = current_stage;
@@ -135,14 +135,14 @@ void mem::think(identifier modulus, identifier remainder) {
     }
 }
 
-void mem::close() {
+void seqt::close() {
     std::unique_lock<std::shared_mutex> lock(read_mutex);
     closed = true;
     lock.unlock();
     cv.notify_all();
 }
 
-void mem::read(symbol c) {
+void seqt::read(symbol c) {
     std::unique_lock<std::shared_mutex> lock(read_mutex);
 
     // get the id of this symbol
