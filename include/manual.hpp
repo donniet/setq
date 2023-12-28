@@ -169,7 +169,7 @@ struct seqt {
     void read(uint32_t);
     bool is_duplicate(node_type, node * a, node * b);
     void read_node(
-        vector<node*>::iterator this_one, vector<node*> & todo, 
+        vector<node*>::iterator this_one, vector<node*> & todo,
         set<node*> & visited, set<sequence_reference> & next_waiting_for,
         set<tuple<node_type, node*, node*>> & new_nodes);
 
@@ -180,6 +180,7 @@ struct seqt {
     node_set_type nodes;
     map<uint32_t,node_iterator> atom_index;
     set<sequence_reference> waiting_for;
+    vector<node*> completed;
 
 };
 
@@ -190,7 +191,7 @@ ostream & seqt::dump(ostream & os) {
 
     auto write_char = [&os](uint32_t c) {
         if(c >= 33 && c <= 126) {
-            os << c;
+            os << (char)c;
             return;
         }
         os << "\\u" << std::hex << std::setfill('0') << std::setw(4) << (uint16_t)c;
@@ -305,6 +306,10 @@ void seqt::read(uint32_t s) {
         cur++;
     }
 
+    for(node * prev : completed)
+        for(node * cur : todo)
+            new_nodes.insert({sequence, prev, cur});
+
     // go through all the new potential nodes and try and remove any duplicates before creating them
     for(auto t : new_nodes) {
         node_type typ;
@@ -321,6 +326,7 @@ void seqt::read(uint32_t s) {
         }
     }
 
+    completed = todo;
     waiting_for = next_waiting_for;
 }
 
@@ -371,7 +377,7 @@ bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
 }
 
 void seqt::read_node(
-    vector<seqt::node*>::iterator this_one, vector<seqt::node*> & todo, 
+    vector<seqt::node*>::iterator this_one, vector<seqt::node*> & todo,
     set<seqt::node*> & visited, set<seqt::sequence_reference> & next_waiting_for,
     set<tuple<seqt::node_type, seqt::node*, seqt::node*>> & new_nodes) 
 {
