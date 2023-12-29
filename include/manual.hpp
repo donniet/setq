@@ -265,6 +265,7 @@ void seqt::remove_node(node * n) {
         // so many possibilities...
         p->seq.erase(k);
     }
+    n->in_seq.clear();
 
     // unlink n from any collections that reference it
     for(auto j = n->in_col.begin(); j != n->in_col.end(); j++) {
@@ -274,6 +275,7 @@ void seqt::remove_node(node * n) {
         // should we replace it with a collection that n is in, or a collection of all the collections?
         p->col.erase(k);
     }
+    n->in_col.clear();
 
     // now remove n from our list
     nodes.erase(n);

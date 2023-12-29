@@ -20,7 +20,7 @@ int main(int ac, char * av[]) {
         }
     } else {
         // test mode
-        string test = "blbl";
+        string test = "hello!  this is a test of a lot of text to see what happens and if we can detect any patterns in the output.";
 
         for(char c : test) {
             s.read(c);
