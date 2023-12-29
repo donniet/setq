@@ -65,10 +65,13 @@ struct seqt {
         map<node*, collection_iterator> in_col;
 
         node() 
-            : type(atom), weight(0), repr(0) 
+            : type(atom), weight(1), repr(0) 
         { }
         node(uint32_t s) 
-            : type(atom), weight(0), repr(s) 
+            : type(atom), weight(1), repr(s) 
+        { }
+        node(node_type t)
+            : type(t), weight(1), repr(0)
         { }
         
         // don't call this unless you know what you are doing
@@ -159,39 +162,84 @@ struct seqt {
     typedef set<node*,node_weight_less>::iterator node_iterator;
 
     void remove_node(node *);
-    node_iterator make_atom(uint32_t s);
-    node_iterator make_seq(node_iterator, node_iterator);
-    node_iterator make_col(node_iterator, node_iterator);
+    node* make_atom(uint32_t s);
+    node* make_seq(node*, node*);
+    node* make_seq(sequence_iterator, sequence_iterator, node*);
+    node* make_col(node*, node*);
     void read(uint32_t);
     bool is_duplicate(node_type, node * a, node * b);
     void read_node(
         node * this_one, list<node*> & todo,
         set<node*> & visited, set<sequence_reference> & next_waiting_for,
-        set<tuple<node_type, node*, node*>> & new_nodes);
+        set<tuple<sequence_reference, node*>> new_seq,
+        set<tuple<node*, node*>> new_col);
 
     ostream & dump(ostream & os);
 
     ~seqt();
 
     node_set_type nodes;
-    map<uint32_t,node_iterator> atom_index;
+    map<uint32_t,node*> atom_index;
     set<sequence_reference> waiting_for;
     list<node*> completed;
 
 };
 
-seqt::node_iterator seqt::make_atom(uint32_t s) {
+seqt::node * seqt::make_atom(uint32_t s) {
     auto a = atom_index.find(s);
     if(a != atom_index.end())
         return a->second;
 
     node * n = new node(s);
-    bool _; // insertion should always succeed
-    node_iterator i;
-    tie(i, _) = nodes.insert(n);
-    atom_index[s] = i; // remember where this atom is
+    nodes.insert(n);
+    atom_index[s] = n; // remember where this atom is
 
-    return i;
+    return n;
+}
+
+seqt::node * seqt::make_seq(node * a, node * b) {
+    node * r = new node(sequence);
+    for(node * x : {a, b}) {
+        if(x->type == sequence) {
+            for(auto i = x->seq.begin(); i != x->seq.end(); i++) {
+                r->append(*i);
+            }
+        } else {
+            r->append(x);
+        }
+    }
+    nodes.insert(r);
+    return r;
+}
+seqt::node * seqt::make_seq(sequence_iterator b, sequence_iterator e, node * n) {
+    node * r = new node(sequence);
+    for(auto i = b; i != e; i++) {
+        r->append(*i);
+    }
+    if(n->type == sequence) {
+        for(auto i = n->seq.begin(); i != n->seq.end(); i++) {
+            r->append(*i);
+        }
+    } else {
+        r->append(n);
+    }
+    nodes.insert(r);
+    return r;
+}
+
+seqt::node * seqt::make_col(node * a, node * b) {
+    node * r = new node(collection);
+    for(node * x : {a, b}) {
+        if(x->type == collection) {
+            for(auto i = x->col.begin(); i != x->col.end(); i++) {
+                r->append(*i);
+            }
+        } else {
+            r->append(x);
+        }
+    }
+    nodes.insert(r);
+    return r;
 }
 
 seqt::~seqt() {
@@ -235,41 +283,47 @@ void seqt::remove_node(node * n) {
 
 
 void seqt::read(uint32_t s) {
-    node_iterator ni = make_atom(s);
-    node * atom_node = *ni;
+    node * atom_node = make_atom(s);
 
     set<node*> visited;
     set<sequence_reference> next_waiting_for;
     list<node*> todo;
-    set<tuple<node_type, node*, node*>> new_nodes;
+    set<tuple<sequence_reference, node*>> new_seq;
+    set<tuple<node*, node*>> new_col;
 
     todo.push_back(atom_node);
     list<node*>::iterator cur = todo.begin();
     
     while(cur != todo.end()) {
-        read_node(*cur, todo, visited, next_waiting_for, new_nodes);
+        read_node(*cur, todo, visited, next_waiting_for, new_seq, new_col);
         cur++;
     }
 
-    for(node * prev : completed)
-        for(node * cur : todo)
-            new_nodes.insert({sequence, prev, cur});
-
-    // go through all the new potential nodes and try and remove any duplicates before creating them
-    for(auto t : new_nodes) {
-        node_type typ;
-        node * a, * b;
-        tie(typ, a, b) = t;
-
-        if(!is_duplicate(typ, a, b)) {
-            node * c = new node();
-            c->type = typ;
-            c->append(a);
-            c->append(b);
-            c->weight = 1;
-
-            nodes.insert(c);  // track our new node
+    for(node * prev : completed) {
+        for(node * c : todo) {
+            if(c->type != atom) continue;
+            
+            if(!is_duplicate(sequence, prev, c)) {
+                make_seq(prev, c);
+            }
         }
+    }
+
+    for(auto t : new_seq) {
+        node * s;
+        sequence_iterator end;
+        tie(s, end) = get<0>(t);
+        node * n = get<1>(t);
+        // none of these should be duplicates ore we would have found them
+
+        make_seq(s->seq.begin(), end, n);
+    }
+
+    for(auto t : new_col) {
+        node * a, * b;
+        tie(a, b) = t;
+        // not sure how to check for duplicates, just add all for now
+        make_col(a, b);
     }
 
     completed = todo;
@@ -278,8 +332,10 @@ void seqt::read(uint32_t s) {
 
 void seqt::read_node(
     node * n, list<seqt::node*> & todo,
-    set<seqt::node*> & visited, set<seqt::sequence_reference> & next_waiting_for,
-    set<tuple<seqt::node_type, seqt::node*, seqt::node*>> & new_nodes) 
+    set<seqt::node*> & visited, 
+    set<seqt::sequence_reference> & next_waiting_for,
+    set<tuple<sequence_reference, node*>> new_seq,
+    set<tuple<node*, node*>> new_col) 
 {
     if(visited.contains(n)) 
         return;
@@ -327,20 +383,18 @@ void seqt::read_node(
             } else {
                 next_waiting_for.insert(sequence_reference(pn, psn));
             }
+            waiting_for.erase(p);
             continue;
-        }
-        
-        // otherwise, maybe we should be tracking these?
-        for(auto w : waiting_for) {
-            node * wn;
-            sequence_iterator wsi;
-            tie(wn, wsi) = w;
+        } 
+    }
 
-            // perhaps we are missing a collection made from the two expected nodes
-            new_nodes.insert({collection, *psi, *wsi});
-            // or perhaps we are missing a sequence with this node and the node we are waiting for
-            new_nodes.insert({sequence, *psi, *wsi});
-            // TODO: think of other things?
+    // whatever is left in waiting_for should be added as new sequences/cols
+    for(auto sr : waiting_for) {
+        new_seq.insert({sr, n});
+        new_col.insert({*get<1>(sr), n});
+        for(auto c : potential_collections) {
+            new_seq.insert({sr, c});
+            new_col.insert({*get<1>(sr), c});
         }
     }
 }
