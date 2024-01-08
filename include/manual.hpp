@@ -11,6 +11,7 @@
 #include <iterator>
 #include <iostream>
 #include <iomanip>
+#include <algorithm>
 
 using std::list;
 using std::map;
@@ -29,28 +30,153 @@ struct seqt {
     };
 
     struct node;
-    struct sequence_reference;
     struct node_weight_less;
 
     typedef list<node*>::iterator sequence_iterator;
     typedef set<node*>::iterator collection_iterator;
 
-    struct sequence_reference
-        : public tuple<node*, sequence_iterator>
-    {
-        bool operator<(sequence_reference const & r) const {
-            return get<0>(*this) < get<0>(r);
-                return true;
-            if(get<0>(r) > get<0>(*this))
-                return false;
+    struct sequence_cursor {
+        node * seq;
+        size_t pos;
+        sequence_iterator iter;
 
-            return get<1>(*this) != get<1>(r);
+        sequence_cursor() 
+            : seq(nullptr), pos(SIZE_MAX), iter() 
+        { }
+        sequence_cursor(node * n, size_t p) 
+            : seq(n), pos(p)
+        {
+            if(seq == nullptr) return;
+            
+            iter = seq->seq.begin();
+            for(size_t i = 0; i < p; i++)
+                iter++;
+        }
+        sequence_cursor(node * n, size_t p, sequence_iterator i)
+            : seq(n), pos(p), iter(i)
+        { }
+        sequence_cursor(sequence_cursor const & r) 
+            : seq(r.seq), pos(r.pos), iter(r.iter)
+        { }
+        sequence_cursor(sequence_cursor && r) 
+            : seq(r.seq), pos(r.pos), iter(r.iter)
+        { }
+        sequence_cursor & operator=(sequence_cursor const & r) {
+            seq = r.seq;
+            pos = r.pos;
+            iter = r.iter;
+            return *this;
+        }
+        sequence_cursor & operator=(sequence_cursor && r) {
+            seq = r.seq; r.seq = nullptr;
+            pos = r.pos; r.pos = 0;
+            iter = r.iter; 
+            return *this;
         }
 
-        sequence_reference(node* n, sequence_iterator i) 
-            : tuple<node*, sequence_iterator>({n, i}) 
-        { }
+        bool operator<(sequence_cursor r) const {
+            if(seq < r.seq) return true;
+            if(r.seq < seq) return false;
+            return pos < r.pos;
+        }
+
+        static sequence_cursor lower(node * n) {
+            return sequence_cursor{n, 0};
+        }
     };
+    
+    // struct sequence_reference_set {
+    //     map<node*, list<sequence_iterator>> refs;
+
+    //     bool add(node* n, sequence_iterator i) {
+    //         if(!refs.contains(n)) 
+    //             refs[n] = list<sequence_iterator>();
+            
+    //         // slow but whatever
+    //         for(auto j : refs[n]) {
+    //             if(j == i) return false;
+    //         }
+
+    //         refs[n].push_back(i);
+    //         return true;
+    //     }
+
+    //     bool remove(node * n, sequence_iterator i) {
+    //         if(!refs.contains(n)) return false;
+
+    //         list<sequence_iterator>::iterator pos = refs[n].begin();
+    //         for(; pos != refs[n].end(); pos++)
+    //             if(*pos == i) break;
+
+    //         if(pos == refs[n].end())
+    //             return false;
+
+    //         refs[n].erase(pos);
+    //     }
+
+    //     bool contains(node * n, sequence_iterator j) {
+    //         if(!refs.contains(n)) return false;
+
+    //         for(auto i = refs[n].begin(); i != refs[n].end(); i++)
+    //             if(*i == j) return true;
+            
+    //         return false;
+    //     }
+
+    //     struct const_iterator {
+    //         map<node*, list<sequence_iterator>>::iterator map_position;
+    //         map<node*, list<sequence_iterator>>::iterator map_end;
+    //         list<sequence_iterator>::iterator list_position;
+
+    //         const_iterator& operator++() {
+    //             if(map_position == map_end) 
+    //                 return *this;
+
+    //             ++list_position;
+
+    //             while(list_position == map_position->second.end()) {
+    //                 ++map_position;
+    //                 if(map_position == map_end)
+    //                     return *this;
+
+    //                 list_position = map_position->second.begin();
+    //             }
+    //         }
+    //         const_iterator operator++(int) {
+    //             const_iterator r = *this;
+    //             this->operator++();
+    //             return r;
+    //         }
+    //         tuple<node*, sequence_iterator> operator*() {
+    //             if(map_position == map_end) 
+    //                 return {nullptr, sequence_iterator()};
+                
+    //             return {map_position->first, *list_position};
+    //         }
+    //         bool operator==(const_iterator const & r) const {
+    //             if(map_position != r.map_position) return false;
+    //             if(map_position == map_end) return true;
+
+    //             return list_position == r.list_position;
+    //         }
+    //         inline bool operator!=(const_iterator const & r) const {
+    //             return !(*this == r);
+    //         }
+    //     };
+
+    //     const_iterator begin() {
+    //         auto b = refs.begin();
+    //         if(b == refs.end())
+    //             return const_iterator{b, refs.end()};
+            
+    //         return const_iterator{b, refs.end(), b->second.begin()};
+    //     }
+    //     const_iterator end() {
+    //         const_iterator{refs.end(), refs.end()};
+    //     }
+
+        
+    // };
 
     struct node {
         node_type type;
@@ -61,7 +187,7 @@ struct seqt {
         list<node*> seq;
         set<node*> col;
 
-        set<sequence_reference> in_seq;
+        set<sequence_cursor> in_seq;
         map<node*, collection_iterator> in_col;
 
         node() 
@@ -78,6 +204,20 @@ struct seqt {
         node(node const & n) 
             : type(n.type), weight(0), repr(n.repr), seq(n.seq), col(n.col), in_seq(), in_col()
         { /* now append something! */ }
+
+        void add_sequence_reference(node * n, size_t pos, sequence_iterator i) {
+            in_seq.insert({n, pos, i});
+        }
+
+        void remove_sequence_references(node * n) {
+            auto i = in_seq.lower_bound(sequence_cursor::lower(n));
+            if(i == in_seq.end()) 
+                return;
+
+            ++i;
+            for(;i->seq == n; ++i)
+                in_seq.erase(i);
+        }
 
         bool expects(uint32_t s, list<node*> & chain, set<node*> & visited) {
             if(visited.contains(this)) 
@@ -133,9 +273,10 @@ struct seqt {
 
         void _append_sequence(node * n) {
             // append n to the sequence
-            sequence_iterator pos = seq.insert(seq.end(), n);
+            size_t pos = seq.size();
+            sequence_iterator i = seq.insert(seq.end(), n);
             // let n know where it is appended in our sequence
-            n->in_seq.insert(sequence_reference(this, pos));
+            n->add_sequence_reference(this, pos, i);
         }
 
         void _append_collection(node * n) {
@@ -167,11 +308,13 @@ struct seqt {
     node* make_seq(sequence_iterator, sequence_iterator, node*);
     node* make_col(node*, node*);
     void read(uint32_t);
+    void cleanup(size_t min_weight);
     bool is_duplicate(node_type, node * a, node * b);
     void read_node(
         node * this_one, list<node*> & todo,
-        set<node*> & visited, set<sequence_reference> & next_waiting_for,
-        set<tuple<sequence_reference, node*>> new_seq,
+        set<node*> & visited,
+        set<sequence_cursor> & next_waiting_for,
+        set<tuple<sequence_cursor, node*>> new_seq,
         set<tuple<node*, node*>> new_col);
 
     ostream & dump(ostream & os);
@@ -180,10 +323,11 @@ struct seqt {
 
     node_set_type nodes;
     map<uint32_t,node*> atom_index;
-    set<sequence_reference> waiting_for;
+    set<sequence_cursor> waiting_for;
     list<node*> completed;
 
 };
+
 
 seqt::node * seqt::make_atom(uint32_t s) {
     auto a = atom_index.find(s);
@@ -254,43 +398,64 @@ seqt::~seqt() {
 }
 
 
-void seqt::remove_node(node * n) {
+void seqt::remove_node(node * r) {
     // unlink n from any sequences that reference it
-    for(auto j = n->in_seq.begin(); j != n->in_seq.end(); j++) {
-        node * p;
-        sequence_iterator k;
-        tie(p, k) = *j;
+    set<node*> to_remove;
+    vector<node*> stack;
+    stack.push_back(r);
+    while(!stack.empty()) {
+        node * cur = stack.back();
+        stack.pop_back();
 
-        // should we replace it with a collection of all the collections that n is in maybe?
-        // so many possibilities...
-        p->seq.erase(k);
+        if(to_remove.contains(cur))
+            continue;
+        to_remove.insert(cur);
+
+        for(auto s : cur->in_seq) {
+            stack.push_back(s.seq);
+        }
     }
-    n->in_seq.clear();
 
-    // unlink n from any collections that reference it
-    for(auto j = n->in_col.begin(); j != n->in_col.end(); j++) {
-        node * p = j->first;
-        collection_iterator k = j->second;
+    for(node * n : to_remove) {
+        // we checked for dependencies, can we just remove them?
 
-        // should we replace it with a collection that n is in, or a collection of all the collections?
-        p->col.erase(k);
+        for(auto m : n->seq) {
+            m->remove_sequence_references(n);
+        }
+        // unlink n from any collections that reference it
+        for(auto j = n->in_col.begin(); j != n->in_col.end(); j++) {
+            node * p = j->first;
+            collection_iterator k = j->second;
+
+            // should we replace it with a collection that n is in, or a collection of all the collections?
+            p->col.erase(k);
+        }
+        n->in_col.clear();
+
+        nodes.erase(n);
+        delete n;
     }
-    n->in_col.clear();
-
-    // now remove n from our list
-    nodes.erase(n);
-    // nodes.erase(i);
-    delete n;
 }
 
+void seqt::cleanup(size_t min_weight) {
+    vector<node*> to_remove;
+
+    for(node * n : nodes) {
+        if(n->weight < min_weight) 
+            to_remove.push_back(n);
+    }
+
+    for(node * n : to_remove) 
+        remove_node(n);
+}
 
 void seqt::read(uint32_t s) {
     node * atom_node = make_atom(s);
 
     set<node*> visited;
-    set<sequence_reference> next_waiting_for;
+    set<sequence_cursor> next_waiting_for;
     list<node*> todo;
-    set<tuple<sequence_reference, node*>> new_seq;
+    set<tuple<sequence_cursor, node*>> new_seq;
     set<tuple<node*, node*>> new_col;
 
     todo.push_back(atom_node);
@@ -304,21 +469,27 @@ void seqt::read(uint32_t s) {
     for(node * prev : completed) {
         for(node * c : todo) {
             if(c->type != atom) continue;
-            
-            if(!is_duplicate(sequence, prev, c)) {
+
+            switch(prev->type) {
+            case atom:
+            case collection:
                 make_seq(prev, c);
+                break;
+            case sequence:
+                make_seq(prev->seq.begin(), prev->seq.end(), c);
+                break;
             }
+            
         }
     }
 
     for(auto t : new_seq) {
-        node * s;
-        sequence_iterator end;
-        tie(s, end) = get<0>(t);
-        node * n = get<1>(t);
+        sequence_cursor cur;
+        node * next;
+        tie(cur, next) = t;
         // none of these should be duplicates ore we would have found them
 
-        make_seq(s->seq.begin(), end, n);
+        make_seq(cur.seq->seq.begin(), cur.iter, next);
     }
 
     for(auto t : new_col) {
@@ -335,8 +506,8 @@ void seqt::read(uint32_t s) {
 void seqt::read_node(
     node * n, list<seqt::node*> & todo,
     set<seqt::node*> & visited, 
-    set<seqt::sequence_reference> & next_waiting_for,
-    set<tuple<sequence_reference, node*>> new_seq,
+    set<sequence_cursor> & next_waiting_for,
+    set<tuple<sequence_cursor, node*>> new_seq,
     set<tuple<node*, node*>> new_col) 
 {
     if(visited.contains(n)) 
@@ -346,7 +517,7 @@ void seqt::read_node(
     n->weight++; // increment the weight of this node because we found it
 
     set<node*> potential_collections;
-    set<sequence_reference> potential_sequences;
+    set<sequence_cursor> potential_sequences;
 
     // get all the collections that this node is in
     for(auto p : n->in_col) {
@@ -360,31 +531,35 @@ void seqt::read_node(
 
     // now find any sequences that contain these collections, or the node itself
     // these reference the position of this node, so if it's at the beggining then we can ignore it
-    potential_sequences.insert(n->in_seq.begin(), n->in_seq.end());
+    for(auto s : n->in_seq)
+        potential_sequences.insert(s);
+        
     for(node * col : potential_collections) {   
-        potential_sequences.insert(col->in_seq.begin(), col->in_seq.end());
+        for(auto s : col->in_seq)
+            potential_sequences.insert(s);
     }
 
     for(auto p : potential_sequences) {
-        node * pn;
-        sequence_iterator psi, psn;
-        tie(pn, psn) = p;
-        psi = psn++; 
+        node * pn = p.seq;
+        size_t pos = p.pos;
+        sequence_iterator psi = p.iter, psn = psi;
+        psn++;
 
         // this symbol is right at the beginning so add it to the next_waiting_for
         if(pn->seq.begin() == psi) {
-            next_waiting_for.insert(sequence_reference(pn, psn));
+            next_waiting_for.insert(sequence_cursor{pn, pos+1, psn});
+            // next_waiting_for.add(pn, psn);
             continue;
         }
 
         // is this in our waiting for?
         if(waiting_for.contains(p)) {
             // add it to our list of matches
-            if(psn == pn->seq.end()) {
+            if(psn == pn->seq.end())
                 todo.push_back(pn);
-            } else {
-                next_waiting_for.insert(sequence_reference(pn, psn));
-            }
+            else
+                next_waiting_for.insert(sequence_cursor{pn, pos+1, psn});
+
             waiting_for.erase(p);
             continue;
         } 
@@ -393,60 +568,57 @@ void seqt::read_node(
     // whatever is left in waiting_for should be added as new sequences/cols
     for(auto sr : waiting_for) {
         new_seq.insert({sr, n});
-        new_col.insert({*get<1>(sr), n});
+        new_col.insert({sr.seq, n});
         for(auto c : potential_collections) {
             new_seq.insert({sr, c});
-            new_col.insert({*get<1>(sr), c});
+            new_col.insert({sr.seq, c});
         }
     }
 }
 
 
-bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
-    if(typ == sequence) {
-        for(auto st : a->in_seq) {
-            node * s;
-            sequence_iterator si;
-            tie(s, si) = st;
+// bool seqt::is_duplicate(seqt::node_type typ, seqt::node * a, seqt::node * b) {
+//     if(typ == sequence) {
+//         for(auto st : a->in_seq) {
 
-            // is si the at the begining?
-            if(si != s->seq.begin())
-                continue;
+//             // is si the at the begining?
+//             if(si != s->seq.begin())
+//                 continue;
         
-            // does b come after a?
-            si++;
-            if(si == s->seq.end() || *si != b) 
-                continue;
+//             // does b come after a?
+//             si++;
+//             if(si == s->seq.end() || *si != b) 
+//                 continue;
 
-            // is that the end?
-            si++;
-            if(si != s->seq.end())
-                continue;
+//             // is that the end?
+//             si++;
+//             if(si != s->seq.end())
+//                 continue;
 
-            // if we are still here then we already have a sequence of a and b
-            return true;
-        }
-    } else {
-        // collection
-        for(auto co : a->in_col) {
-            node * c;
-            collection_iterator ci;
-            tie(c, ci) = co;
+//             // if we are still here then we already have a sequence of a and b
+//             return true;
+//         }
+//     } else {
+//         // collection
+//         for(auto co : a->in_col) {
+//             node * c;
+//             collection_iterator ci;
+//             tie(c, ci) = co;
 
-            // does this collection only have two things?
-            if(c->col.size() != 2) 
-                continue;
+//             // does this collection only have two things?
+//             if(c->col.size() != 2) 
+//                 continue;
 
-            // are the two things a and b?
-            if(!c->col.contains(b))
-                continue;
+//             // are the two things a and b?
+//             if(!c->col.contains(b))
+//                 continue;
 
-            return true;
-        }
-    }
+//             return true;
+//         }
+//     }
 
-    return false;
-}
+//     return false;
+// }
 
 
 ostream & seqt::dump(ostream & os) {
@@ -509,8 +681,6 @@ ostream & seqt::dump(ostream & os) {
     os << "]\n";
     return os;
 }
-
-
 
 
 

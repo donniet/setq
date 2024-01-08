@@ -27,6 +27,8 @@ int main(int ac, char * av[]) {
         }
     }
 
+    // s.cleanup(3);
+
     s.dump(cout);
     cout.flush();
     

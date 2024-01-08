@@ -12,6 +12,7 @@ enable_testing()
 add_executable(test_splay test/test_splay.cpp)
 add_executable(test_seqt test/test_seqt.cpp src/seqt.cpp)
 add_executable(test_manual test/test_manual.cpp)
+add_executable(symbol_workspace src/symbol_workspace.cpp)
 
 add_test(NAME test_splay COMMAND test_splay)
 add_test(NAME test_seqt COMMAND test_seqt)
