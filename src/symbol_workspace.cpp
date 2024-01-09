@@ -7,8 +7,10 @@
 #include <set>
 #include <functional>
 #include <memory>
+#include <cmath>
 
 using namespace std;
+
 
 struct symbol_map 
     : public map<string, int>
@@ -121,6 +123,48 @@ map<string,int> read_char(char c, map<string,int> symbol_positions) {
     return ret;
 }
 
+map<tuple<int,int,int>, double> _probs;
+
+// returns the probability that there were trans or more transitions
+// in a random sequence composed of a of the first symbol and b of the second
+// should be commutative in a,b
+double sequence_probability(int a, int b, int trans) {
+    double unique_sequence_count = 0.;
+    // imagine a sequence of all a's.  we have a+1 locations to add the first b
+
+    // baaaa, abaaa, aabaa, aaaba, aaaab                         A+1
+    // bbaaaa, babaaa, baabaa, baaaba, baaaab, abbaaa, ababaa, abaaba, abaaab, aabbaa, aababa, aabaab, aaabba, aaabab, aaaabb                  
+    // bbbaaaa, bbabaaa, bbaabaa, bbaaaba, babbaaa, bababaa, babaaba, babaaab,
+    //          baabbaa, baababa, baabaab, baaabba, baaabab, baaaaba, 
+    //          abbbaaa, abbabaa, abbaaba, abbaaab, ababbaa, abababa,
+    //          ababaab, abaabba, abaabab, abaaabb, aabbbaa, aabbaba,
+    //          aabbaab, aababba, aababab, aabaabb, aaabbba, aaabbab,
+    //          aaababb, aaaabbb, 
+
+    double ma = max(a,b);
+    double mi = min(a,b);
+
+    unique_sequence_count = tgamma(ma+1) / tgamma(mi) / tgamma(ma+1 - mi);
+
+
+    double transitions_sequence_sum = 0.;
+    // how many sequences have trans or higher transitions from a to b
+    for(; trans <= min(a,b); trans++) {
+        // start with a sequence (ab){trans} times
+        // now the only places to put an a or b that won't increase the 
+        // number of transitions is between an exsiting transition: aAb or aBb
+        // so we have a + b - 2*trans symbols to add:
+
+        // ____
+        /* bbaaababab, baaabbabab, baaababbab, baaabababb, aaabbbabab, aaabbabbab, aaabbababb, aaababbbab, aaababbabb, aaabababbb
+
+        */
+        // transitions_sequence_sum += pow(trans, )
+        // how many ways to put a+b things into t bins
+        
+
+    }
+}
 
 int main(int ac, char ** av) {
     istream * in = &cin;
@@ -149,6 +193,7 @@ int main(int ac, char ** av) {
         auto previously_completed = completed;
         completed = make_shared<vector<string>>();
         char sym[2] = {c, 0};
+
         completed->push_back(sym);
 
         // first look for transitions from the completed tracked symbols to this character
@@ -178,12 +223,36 @@ int main(int ac, char ** av) {
             }
         }
 
-        tracked_symbols.insert({sym, {previously_completed, 1}});
-
         for(auto s : *completed) {
             counts[s]++;
         }
+
+        // auto i = counts.lower_bound(sym);
+        // i++;
+        // for(; i != counts.end() && i->first[0] == c; i++) {          
+        //     cerr << "tracking: " <<  i->first << endl;
+        //     tracked_symbols.insert({i->first, {previously_completed, 1}});
+        // }
+        tracked_symbols.insert({sym, {previously_completed, 1}});
+        
     });
+
+    /* now lets figure out which are potential new symbols to create.
+     these are transitions very unlikely to happen by chance
+    */
+
+    for(auto t : transitions) {
+        pair<string,string> w;
+        int transition_count, a_count, b_count;
+
+        tie(w, transition_count) = t;    
+        a_count = counts[w.first];
+        b_count = counts[w.second];
+
+        // what is the number of ways that you can construct a sequence of a's and b's
+        
+
+    }
 
     write_symbol_csv(cout, counts, transitions);
 
