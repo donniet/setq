@@ -191,8 +191,8 @@ double sequence_probability(int a, int b, int trans) {
         // ;
 
         sequences_with_t_transitions += 
-            binomial(trans-1, a - trans+1)
-          * binomial(trans-1, b - trans+1)
+            binomial(trans+1, a - trans)
+          * binomial(trans+1, b - trans)
         ;
     }
 
@@ -220,17 +220,10 @@ int main(int ac, char ** av) {
     // in->seekg(std::ios::beg);
 
     map<string, tuple<shared_ptr<vector<string>>, int>> tracked_symbols;
-    shared_ptr<vector<string>> completed = make_shared<vector<string>>();
+    shared_ptr<vector<string>> completed; // = make_shared<vector<string>>();
     transition_map transitions;
 
-    buffered_read(*in, [&](char c) {
-        // increment counts on all completed symbols
-        auto previously_completed = completed;
-        completed = make_shared<vector<string>>();
-        char s[2] = {c, 0};
-
-        // completed->push_back(s);
-
+    auto process_tracked_symbols = [&](char c = '\0') {
         // first look for transitions from the completed tracked symbols to this character
         for(auto i = tracked_symbols.begin(); i != tracked_symbols.end();) {
             auto j = i++; // save the position and increment iterator
@@ -257,6 +250,17 @@ int main(int ac, char ** av) {
                 tracked_symbols.erase(j);
             }
         }
+    };
+
+
+    buffered_read(*in, [&](char c) {
+        // increment counts on all completed symbols
+        completed = make_shared<vector<string>>();
+        char s[2] = {c, 0};
+
+        // completed->push_back(s);
+
+        process_tracked_symbols(c);
 
         for(auto s : *completed) {
             counts[s]++;
@@ -270,15 +274,28 @@ int main(int ac, char ** av) {
         // }
         // don't add sym because we already marked it as completed
         // only add tracked_symbols if they aren't completed.
-        tracked_symbols.insert({s, {previously_completed, 1}});
+        tracked_symbols.insert({s, {completed, 1}});
         
     });
+
+    // one more time to close out anything
+    completed = make_shared<vector<string>>();
+    process_tracked_symbols();
+    for(auto s : *completed) {
+        counts[s]++;
+    }
 
     /* now lets figure out which are potential new symbols to create.
      these are transitions very unlikely to happen by chance
     */
 
+    for(auto p : counts) {
+        cout << "count('" << p.first << "') == " << p.second << endl; 
+    }
+
     for(auto t : transitions) {
+        cout << "transition('" << t.first.first << t.first.second << "') == " << t.second << endl;
+
         pair<string,string> w;
         int transition_count, a_count, b_count;
 
