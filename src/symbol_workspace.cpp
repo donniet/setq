@@ -1,3 +1,6 @@
+
+// #include "partition.hpp"
+
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -8,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <cmath>
+
 
 using namespace std;
 
@@ -125,6 +129,14 @@ map<string,int> read_char(char c, map<string,int> symbol_positions) {
 
 map<tuple<int,int,int>, double> _probs;
 
+double binomial(double n, double k) {
+    return tgamma(n+1) / tgamma(k+1) / tgamma(n-k+1);
+}
+
+double lbinomial(double n, double k) {
+    return lgamma(n+1) - lgamma(k+1) - lgamma(n-k+1);
+}
+
 // returns the probability that there were trans or more transitions
 // in a random sequence composed of a of the first symbol and b of the second
 // should be commutative in a,b
@@ -144,28 +156,51 @@ double sequence_probability(int a, int b, int trans) {
     double ma = max(a,b);
     double mi = min(a,b);
 
-    unique_sequence_count = tgamma(ma+1) / tgamma(mi) / tgamma(ma+1 - mi);
+    // unique_sequence_count = tgamma(ma+1) / tgamma(mi) / tgamma(ma+1 - mi);
+    unique_sequence_count = binomial(ma+mi+1, mi);
 
-
-    double transitions_sequence_sum = 0.;
+    double sequences_with_t_transitions = 0.;
     // how many sequences have trans or higher transitions from a to b
     for(; trans <= min(a,b); trans++) {
         // start with a sequence (ab){trans} times
         // now the only places to put an a or b that won't increase the 
         // number of transitions is between an exsiting transition: aAb or aBb
         // so we have a + b - 2*trans symbols to add:
-
-        // ____
-        /* bbaaababab, baaabbabab, baaababbab, baaabababb, aaabbbabab, aaabbabbab, aaabbababb, aaababbbab, aaababbabb, aaabababbb
+        /* abab a
+           aabab abaab ababa
+           abab b
+           babab abbab ababb
+           abab ab
+           baabab babaab bababa aabbab abbaab abbaba aababb abaabb ababba 
 
         */
-        // transitions_sequence_sum += pow(trans, )
+
+        // ____
+        /* bbaaababab, baaabbabab, baaababbab, baaabababb, aaabbbabab, 
+           aaabbabbab, aaabbababb, aaababbbab, aaababbabb, aaabababbb,
+           bbaabaabab, bbaababaab, bbaabababa, bbabaaabab, bbabaabaab,
+           bbabaababa, bbababaaab, bbababaaba, bbabababaa
+
+        */
+        // sequences_with_t_transitions += pow(trans, )
         // how many ways to put a+b things into t bins
         
+        // sequences_with_t_transitions += 
+        //     partition_identical_n_distinct_k(a, trans)
+        //   * partition_identical_n_distinct_k(b, trans)
+        // ;
 
+        sequences_with_t_transitions += 
+            binomial(trans-1, a - trans+1)
+          * binomial(trans-1, b - trans+1)
+        ;
     }
+
+    return sequences_with_t_transitions / unique_sequence_count;
 }
 
+
+// getting symbols aa and bb instead of ab and ba.  Something wrong with previous completed and the transition logic
 int main(int ac, char ** av) {
     istream * in = &cin;
     ifstream f;
@@ -192,9 +227,9 @@ int main(int ac, char ** av) {
         // increment counts on all completed symbols
         auto previously_completed = completed;
         completed = make_shared<vector<string>>();
-        char sym[2] = {c, 0};
+        char s[2] = {c, 0};
 
-        completed->push_back(sym);
+        // completed->push_back(s);
 
         // first look for transitions from the completed tracked symbols to this character
         for(auto i = tracked_symbols.begin(); i != tracked_symbols.end();) {
@@ -233,7 +268,9 @@ int main(int ac, char ** av) {
         //     cerr << "tracking: " <<  i->first << endl;
         //     tracked_symbols.insert({i->first, {previously_completed, 1}});
         // }
-        tracked_symbols.insert({sym, {previously_completed, 1}});
+        // don't add sym because we already marked it as completed
+        // only add tracked_symbols if they aren't completed.
+        tracked_symbols.insert({s, {previously_completed, 1}});
         
     });
 
@@ -250,11 +287,15 @@ int main(int ac, char ** av) {
         b_count = counts[w.second];
 
         // what is the number of ways that you can construct a sequence of a's and b's
-        
+        double transition_prob = sequence_probability(a_count, b_count, transition_count);
+
+        if(transition_prob < 0.01) {
+            cout << "new symbol: " << w.first << w.second << " p-value: " << setw(5) << transition_prob * 100. << "%" << endl;
+        }
 
     }
 
-    write_symbol_csv(cout, counts, transitions);
+    // write_symbol_csv(cout, counts, transitions);
 
     return 0;
 }

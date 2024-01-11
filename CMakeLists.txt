@@ -13,6 +13,7 @@ add_executable(test_splay test/test_splay.cpp)
 add_executable(test_seqt test/test_seqt.cpp src/seqt.cpp)
 add_executable(test_manual test/test_manual.cpp)
 add_executable(symbol_workspace src/symbol_workspace.cpp)
+target_link_libraries(symbol_workspace partition)
 
 add_library(partition src/partition.cpp)
 

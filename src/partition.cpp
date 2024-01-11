@@ -3,6 +3,23 @@
 #include <vector>
 #include <tuple>
 
+/* 
+number of partitions of N identical items into K distinct bins P(n,k)
+
+Recurrence Relation: 
+
+         0 in bin0  1 in bin0    2 in bin0    3 in bin0          n in bin0
+P(n,k) = P(n,k-1) + P(n-1,k-1) + P(n-2,k-1) + P(n-3,k-1) + ... + P(0,k-1)
+       = P(n,k-1) + P(n-1,k)  <-- pascal!
+
+        P(0,k) = 1   one way to add zero balls to k bins
+for n>0 P(n,0) = 0   zero ways to add a non-zero number of balls to zero bins
+        
+ex:
+P(1,k) = 
+
+*/
+
 unsigned long partition_identical_n_distinct_k(unsigned long n, unsigned long k) 
 {
     using namespace std;
@@ -10,6 +27,9 @@ unsigned long partition_identical_n_distinct_k(unsigned long n, unsigned long k)
     static vector<unsigned long> cache;
     static auto get_cache = [](unsigned long n, unsigned long k, vector<unsigned long> & cache) -> unsigned long &
     {
+        unsigned long mi = min(n,k);
+        unsigned long ma = max(n,k);
+
         unsigned int diagonal = n + k + 1;                  // zero indexed
         unsigned int start = diagonal * (diagonal + 1) / 2; // sum of all elements in the triangle before this diagonal
         unsigned int next_start = (diagonal + 1) * (diagonal + 2) / 2;
