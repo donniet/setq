@@ -200,11 +200,18 @@ double sequence_probability(int a, int b, int trans) {
 }
 
 
+
+    
+
+
 // getting symbols aa and bb instead of ab and ba.  Something wrong with previous completed and the transition logic
 int main(int ac, char ** av) {
     istream * in = &cin;
     ifstream f;
     symbol_map counts;
+
+    // 3 sigma threshold for new symbols
+    double new_symbol_threshold = 0.003;
 
     if(ac > 1) {
         f.open(av[1], std::ios::in);
@@ -220,7 +227,7 @@ int main(int ac, char ** av) {
     // in->seekg(std::ios::beg);
 
     map<string, tuple<shared_ptr<vector<string>>, int>> tracked_symbols;
-    shared_ptr<vector<string>> completed; // = make_shared<vector<string>>();
+    shared_ptr<vector<string>> completed = make_shared<vector<string>>();
     transition_map transitions;
 
     auto process_tracked_symbols = [&](char c = '\0') {
@@ -252,6 +259,39 @@ int main(int ac, char ** av) {
         }
     };
 
+    auto process_transitions = [&]() {
+        for(auto t : transitions) {
+            cout << "transition('" << t.first.first << t.first.second << "') == " << t.second << endl;
+
+            pair<string,string> w;
+            int transition_count, a_count, b_count;
+
+            tie(w, transition_count) = t;    
+            a_count = counts[w.first];
+            b_count = counts[w.second];
+            string n = w.first;
+            n.append(w.second);
+
+            // what is the number of ways that you can construct a sequence of a's and b's
+            double transition_prob = sequence_probability(a_count, b_count, transition_count);
+
+            // after a symbol is added we should stop tracking the transition altogether maybe?
+            if(transition_prob < new_symbol_threshold && !counts.contains(n)) {
+                cout << "new symbol: " << n << " p-value: " << setw(5) << transition_prob * 100. << "%" << endl;
+                
+                /*
+                    sequence_node nn(n);
+                    nn.first = w.first;
+                    nn.second = w.second;
+                */
+                counts[n] = transition_count;
+            }
+            /*
+                or should we check to see if this transition crosses back into the "very likely" like < 1sigma
+            */
+        }
+    };
+
 
     buffered_read(*in, [&](char c) {
         // increment counts on all completed symbols
@@ -266,16 +306,18 @@ int main(int ac, char ** av) {
             counts[s]++;
         }
 
-        // auto i = counts.lower_bound(sym);
-        // i++;
-        // for(; i != counts.end() && i->first[0] == c; i++) {          
-        //     cerr << "tracking: " <<  i->first << endl;
-        //     tracked_symbols.insert({i->first, {previously_completed, 1}});
-        // }
+        auto i = counts.lower_bound(s);
+        if(i != counts.end()) i++;
+        for(; i != counts.end() && i->first[0] == c; i++) {          
+            cerr << "tracking: " <<  i->first << endl;
+            tracked_symbols.insert({i->first, {completed, 1}});
+        }
+
         // don't add sym because we already marked it as completed
         // only add tracked_symbols if they aren't completed.
         tracked_symbols.insert({s, {completed, 1}});
-        
+
+        process_transitions();
     });
 
     // one more time to close out anything
@@ -285,6 +327,8 @@ int main(int ac, char ** av) {
         counts[s]++;
     }
 
+    process_transitions();
+
     /* now lets figure out which are potential new symbols to create.
      these are transitions very unlikely to happen by chance
     */
@@ -293,26 +337,9 @@ int main(int ac, char ** av) {
         cout << "count('" << p.first << "') == " << p.second << endl; 
     }
 
-    for(auto t : transitions) {
-        cout << "transition('" << t.first.first << t.first.second << "') == " << t.second << endl;
+    
 
-        pair<string,string> w;
-        int transition_count, a_count, b_count;
-
-        tie(w, transition_count) = t;    
-        a_count = counts[w.first];
-        b_count = counts[w.second];
-
-        // what is the number of ways that you can construct a sequence of a's and b's
-        double transition_prob = sequence_probability(a_count, b_count, transition_count);
-
-        if(transition_prob < 0.01) {
-            cout << "new symbol: " << w.first << w.second << " p-value: " << setw(5) << transition_prob * 100. << "%" << endl;
-        }
-
-    }
-
-    // write_symbol_csv(cout, counts, transitions);
+    write_symbol_csv(cout, counts, transitions);
 
     return 0;
 }
