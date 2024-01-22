@@ -9,3 +9,17 @@
 * work on creating new sequences (beyond just pairs)
 * test out garbage collection based on weight
 * read in a lot of text (alice_1.txt) and see what patterns come out
+
+
+
+## Set Probability
+A set containing {a,b} is only worth keeping if a and b can be replaced with each other. that would mean that sequences: XaY and XbY would appear more likely than expected.  
+
+C(X[ab]Y) = C(XaY) + C(XbY) 
+
+C(Xa) + C(aY) and C(Xb) + C(bY)
+
+C(Xa) would be C(a) as well as C(aY)
+
+C(XaY) = C(Xa^Y) = C(X^aY)  <--- these two 3-sequences should be merged with this process
+

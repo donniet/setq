@@ -71,18 +71,18 @@ string escape_inline(string const & c) {
 }
 
 void write_symbol_csv(ostream & os, symbol_map const & symbols, transition_map const & transitions) {
+    os << "\"Symbol\", \"Length\", \"Count\", \"Total Characters\", \"Next...\", \"Count...\"\n";
     for(auto p : symbols) {
-        os << "\"";
-        escape(os, p.first);
-        os << "\", " << p.second;
+        os << "\"" << escape_inline(p.first) << "\", "
+           << p.first.length() << ", "
+           << p.second << ", "
+           << p.first.length() * p.second;
 
         // pair<string,string> l(p.first, "");
 
         auto i = transitions.lower_bound({p.first, ""});
         ++i;
-
         vector<pair<string,int>> follows;
-
         for(; i->first.first == p.first; ++i) {
             follows.push_back({i->first.second, i->second});
         }
@@ -320,8 +320,13 @@ int main(int ac, char ** av) {
         }
         transitions_modified.clear();
     };
+    
+    stringstream contents;
 
-    buffered_read(*in, [&](char c) {
+    while(*in) {
+        char c = in->get();
+        contents.put(c);
+        
         if(c == '\n') {
             line_count++;
             char_count = 0;
@@ -353,7 +358,7 @@ int main(int ac, char ** av) {
         tracked_symbols.insert({s, {completed, 1}});
 
         process_transitions();
-    });
+    };
 
     // one more time to close out anything
     completed = make_shared<vector<string>>();
@@ -361,7 +366,6 @@ int main(int ac, char ** av) {
     for(auto s : *completed) {
         counts[s]++;
     }
-
     process_transitions();
 
     /* now lets figure out which are potential new symbols to create.
@@ -371,6 +375,40 @@ int main(int ac, char ** av) {
     // for(auto p : counts) {
     //     cout << "count('" << p.first << "') == " << p.second << endl; 
     // }
+
+    // run through the file again, but zero out the counts
+    counts.clear();
+    contents.seekg(ios::beg);
+    while(contents) {
+        char c = contents.get();
+
+        // increment counts on all completed symbols
+        completed = make_shared<vector<string>>();
+        char s[2] = {c, 0};
+
+        // completed->push_back(s);
+
+        process_tracked_symbols(c);
+
+        for(auto s : *completed) {
+            counts[s]++;
+        }
+
+        auto i = counts.lower_bound(s);
+        if(i != counts.end()) i++;
+        for(; i != counts.end() && i->first[0] == c; i++) {          
+            // cerr << "tracking: " <<  i->first << endl;
+            tracked_symbols.insert({i->first, {completed, 1}});
+        }
+
+        // don't add sym because we already marked it as completed
+        // only add tracked_symbols if they aren't completed.
+        tracked_symbols.insert({s, {completed, 1}});
+
+        process_transitions();
+        // transitions_modified.clear();  // we won't process transitions because we don't want new symbols this time
+
+    }
 
     write_symbol_csv(cout, counts, transitions);
 

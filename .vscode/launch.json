@@ -7,7 +7,8 @@
             "request": "launch",
             "program": "${command:cmake.launchTargetPath}",
             "args": [
-                "${command:cmake.launchTargetDirectory}/../text/test_ab.txt"
+                // "${command:cmake.launchTargetDirectory}/../text/alice.txt"
+                "abx", "43", "0.", "dump"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
@@ -17,8 +18,8 @@
                     "value": "$PATH:${command:cmake.launchTargetDirectory}"
                 }
             ],
-            "externalConsole": true,
-            "MIMode": "gdb",
+            "externalConsole": false,
+            "MIMode": "lldb",
             "miDebuggerPath": "lldb-mi",
             "setupCommands": [
                 {
@@ -34,7 +35,7 @@
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}",
             "args": [
-                "${command:cmake.launchTargetDirectory}/../text/test_ab.txt"
+                "${command:cmake.launchTargetDirectory}/../text/alice.txt"
             ],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
