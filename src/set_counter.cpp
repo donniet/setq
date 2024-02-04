@@ -19,8 +19,10 @@ float probability_follows(float n, float p, float x) {
     float var = n * p * (1. - p);
     float exp = n * p;
 
-    return erf(sqrt((x - exp) * (x - exp) / 2 / var));
+    return 0.5 * erfc((x - exp) * sqrt(2 / var));
 }
+
+
 
 int main(int ac, char ** av) {
     using std::cerr, std::cout;
@@ -81,7 +83,7 @@ int main(int ac, char ** av) {
     // reset our counts
     fill(cnt.begin(), cnt.end(), 0);
 
-    cerr << endl << setw(7) << "a~b" << ",";
+    cerr << endl << setw(7) << "a^b" << ",";
 
     for(int i = 0; i < sym.size(); i++)
         cerr << setw(7) << sym[i] << ",";
@@ -90,7 +92,9 @@ int main(int ac, char ** av) {
         for(int j = 0; j < sym.size(); j++) {
             cerr << setw(6) << sym[i] << sym[j] << ",";
         }
-    cerr << "total" << endl;
+
+    cout << setw(7) << "E[a]," << setw(7) << "E[b],";
+    cout << setw(7) << "total" << endl;
 
     cout << setw(7) << replace_ab_ratio << ",";
 
@@ -102,20 +106,27 @@ int main(int ac, char ** av) {
         for(int r = rd() % (sequence_length - i); r > rem[char_index];)
             r -= rem[char_index++];
 
+
         // swap the first two symbols on the roll of a die
         // this simulates how two symbols can be replaced with one another because
         // they have a similar meaning in the context
         // we are going to want to back-into this `replace_ab_ratio` number from the data
         // always flip the coin though, so the random number generator stays synced
-        if( ab_coin(rd) < replace_ab_ratio && char_index < 2) {
-            // cerr << "replacing" << endl;
-            char_index = (char_index + 1)%2;
-        } else {
+        auto rep_ab = ab_coin(rd);
+
+        if( (char_index == 0 && rep_ab < replace_ab_ratio)
+         || (char_index == 1 && rep_ab < replace_ab_ratio) ) 
+        {
+            char_index = (char_index + 1) % 2;
+        }
+        else {
             // cerr << "not replacing" << endl;
         }
-        
+
+
         // one fewer symbols remaining
         rem[char_index]--;
+        
 
         // increment our actual symbols after replacing
         cnt[char_index]++;
@@ -132,6 +143,9 @@ int main(int ac, char ** av) {
     for(int i = 0; i < sym.size(); i++)
         for(int j = 0; j < sym.size(); j++)
             cout << setw(7) << sequence_counts[i][j] << ",";
+
+    cout << setw(7) << floor((double)exp[0] * (1.-replace_ab_ratio) + (double)exp[1] * replace_ab_ratio) << ",";
+    cout << setw(7) << floor((double)exp[1] * (1.-replace_ab_ratio) + (double)exp[0] * replace_ab_ratio) << ",";
         
     cout << sequence_length << endl;
 

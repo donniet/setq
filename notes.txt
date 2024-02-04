@@ -23,3 +23,9 @@ C(Xa) would be C(a) as well as C(aY)
 
 C(XaY) = C(Xa^Y) = C(X^aY)  <--- these two 3-sequences should be merged with this process
 
+IDEA:
+
+* Both sets and sequences are "unlikely" pairings of symbols
+* Sets follow baysian statistics: P(A|B) = P(B|A) * P(A) / P(B)
+* Sequences would not 
+

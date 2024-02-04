@@ -6,8 +6,9 @@ add_compile_options(--std=c++20 -g)
 
 include_directories(include)
 
+find_package(TBB REQUIRED)
 find_package(BOOST 1.83 COMPONENTS math)
-include_directories(${Boost_INCLUDE_DIR})
+include_directories(${Boost_INCLUDE_DIR} ${TBB_INCLUDE_DIR})
 
 # find_package(ICU 72.1 COMPONENTS uc i18n REQUIRED)
 
@@ -22,6 +23,9 @@ target_link_libraries(set_counter ${Boost_LIBRARIES})
 
 add_executable(symbol_workspace src/symbol_workspace.cpp)
 target_link_libraries(symbol_workspace partition)
+
+add_executable(bit_seqt src/bit_seqt.cpp)
+target_link_libraries(bit_seqt -pthread TBB::tbb)
 
 add_executable(seqt_node src/seqt_node.cpp)
 # target_link_libraries(seqt_node ICU::uc ICU::i18n)
