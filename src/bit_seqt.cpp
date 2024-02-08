@@ -10,6 +10,8 @@
 #include <string>
 #include <sstream>
 
+const float statistical_significance = 3.; // standard deviations
+
 using namespace std;
 
 struct seqt {
@@ -22,20 +24,38 @@ struct seqt {
     vector<node_pair> node_index;
     vector<node_pair> suggested;
     vector<size_t> scrap;
+    vector<float> charge_buffer;
 
     static float pvalue(size_t first, size_t second, size_t count_sequence);
 
     node_ptr ptr(size_t offset);
+    node_ptr ptr(node const & n);
 
     void save(ostream & os);
     void read(bool bit);
     void for_each_node(std::function<void(node &)>);
-    bool is_novel_suggestion(node & n);
-    void pack_suggestions(node & n, node_ptr output_begin);
-    void pack_suggestion_index(node & n, node_pair * output_begin);
+    bool is_novel_suggestion(node_ptr first, node_ptr second);
+    void pack_suggestions(node & n, node_ptr next, vector<node>::iterator output_begin);
+    void pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::iterator output_begin);
 
     seqt();
 };
+
+// number of standard deviations from the expected value ab is
+float sequence_stddevs(size_t a, size_t b, size_t ab) {
+    if(ab > a || ab > b || a + b == 0)
+        return 0;
+
+    float total = (float)(a + b);
+    float pa = (float)a / total;
+    float pb = (float)b / total;
+    float pab = pa * pb;
+    float expected_value = total * pab;
+    float variation = total * pab * (1-pab);
+    float stddev = sqrt(variation);
+
+    return ((float)ab - expected_value) / stddev;
+}
 
 float sequence_pvalue(size_t a, size_t b, size_t ab) {
     if(a == 0 && b == 0) {
@@ -130,70 +150,46 @@ struct seqt::node {
     enum node_operation {
         atom, sequence, relationship
     } op;
-    size_t index;
     size_t count;
-
     int charge;
-    int charge2;
-    float pvalue;
 
     node_ptr first;
     node_ptr second;
-    node_ptr parent;
-
-    node_ptr suggested_next;
 
     node() { } // no initialization for speed
     node(size_t dex) : 
-        op(atom), index(dex), count(0), charge(0), charge2(0), 
-        pvalue(0.5), first(), second(), parent(), 
-        suggested_next()
+        op(atom), count(0), charge(0), first(), second()
     { }
     node(size_t dex, node_operation o, node_ptr f, node_ptr s) :
-        op(o), index(dex), count(0), charge(0), charge2(0), 
-        pvalue(0.5), first(f), second(s), parent(), 
-        suggested_next()
+        op(o), count(0), charge(0), first(f), second(s)
     { }
     node(node const & r) : 
-        op(r.op), index(r.index), count(r.count), charge(r.charge), charge2(r.charge2),
-        pvalue(r.pvalue), first(r.first), second(r.second), parent(r.parent),
-        suggested_next(r.suggested_next)
+        op(r.op), count(r.count), charge(r.charge), first(r.first), second(r.second)
     { }
     node(node && r) : 
-        op(r.op), index(r.index), count(r.count), charge(r.charge), charge2(r.charge2),
-        pvalue(r.pvalue), first(r.first), second(r.second), parent(r.parent),
-        suggested_next(r.suggested_next)
+        op(r.op), count(r.count), charge(r.charge), first(r.first), second(r.second)
     { 
         r.op = atom;
-        r.index = 0;
         r.count = 0;
         r.charge = 0;
-        r.charge2 = 0;
         r.first.reset();
         r.second.reset();
-        r.parent.reset();
     }
 
     node & operator=(node const & r) {
         op = r.op;
-        index = r.index;
         count = r.count;
         charge = r.charge;
-        charge2 = r.charge;
         first = r.first;
         second = r.second;
-        parent = r.parent;
         return *this;
     }
     node & operator=(node && r) {
         op = r.op; r.op = atom;
-        index = r.index;    r.index = 0;
         count = r.count;    r.count = 0;
         charge = r.charge;  r.charge = 0;
-        charge2 = r.charge; r.charge2 = 0;
         first = r.first;    r.first.reset();
         second = r.second;  r.second.reset();
-        parent = r.parent;  r.parent.reset();
         return *this;
     }
 
@@ -204,30 +200,25 @@ struct seqt::node {
 
     void save(seqt * s, ostream & os) const;
     void load(seqt * s, istream & is);
-    void compare_with(node_ptr cur);
-    void multiply_charge(int c) { charge *= c; }
-    void rotate_charge() { charge *= -2; } // 
-    void reset_charge() { charge = 0; }
-    void buffer_charge() { charge2 = charge; }
-    void activate();
-    void activate_atom();
-    void activate_sequence();
-    void activate_relationship();
-    void unbuffer_charge() { charge = charge2; };
-    void recalculate_pvalue();
-    void clear_suggestion() { suggested_next.reset(); }
-
-    bool has_suggestion() { return !suggested_next.is_null(); }
-    bool has_parent() { return !parent.is_null(); }
-    void reset_suggestion() { suggested_next.reset(); }
+    // void multiply_charge(int c) { charge *= c; }
+    // void rotate_charge() { charge *= -2; } // 
+    // void reset_charge() { charge = 0; }
+    // void buffer_charge() { charge2 = charge; }
+    float significance() const;
+    float activate();
+    float activate_atom();
+    float activate_sequence();
+    float activate_relationship();
+    // void unbuffer_charge() { charge = charge2; };
+    // void recalculate_pvalue();
     bool is_active() { return charge > 1; }
 };
 
 bool seqt::node_ptr::operator<(node_ptr const & r) const {
-    return &nodes_->operator[](0) + offset_ < &r.nodes_->operator[](0) + offset_;
+    return &nodes_->operator[](0) + offset_ < &r.nodes_->operator[](0) + r.offset_;
 }
 bool seqt::node_ptr::operator<=(node_ptr const & r) const {
-    return &nodes_->operator[](0) + offset_ <= &r.nodes_->operator[](0) + offset_;
+    return &nodes_->operator[](0) + offset_ <= &r.nodes_->operator[](0) + r.offset_;
 }
 seqt::node & seqt::node_ptr::operator*() const {
     return nodes_->operator[](offset_);
@@ -236,7 +227,7 @@ seqt::node * seqt::node_ptr::operator->() const {
     return &nodes_->operator[](offset_);
 }
 seqt::node_ptr::operator node*() const {
-    return &nodes_->operator[](0) + offset_;
+    return nodes_ == nullptr ? nullptr : &nodes_->operator[](0) + offset_;
 }
 bool seqt::node_ptr::is_null() const {
     return nodes_ == nullptr || offset_ >= nodes_->size();
@@ -264,81 +255,63 @@ seqt::node_ptr seqt::node_ptr::operator--(int) {
     return r;
 }
 
-
-// TODO: this function needs to propose the creation of new nodes
-void seqt::node::compare_with(node_ptr cur) {
-    if(charge > 0) {
-        suggested_next = cur;
+float seqt::node::significance() const {
+    switch(op) {
+    case atom:
+        return numeric_limits<float>::max(); // atoms are infinitely significant
+    case sequence:
+    case relationship:
+        return sequence_stddevs(first->count, second->count, count);
     }
 }
 
-void seqt::node::recalculate_pvalue() { 
-    switch(op) {
-    case atom:
-        pvalue = 1.;
-        break;
-    case sequence:
-        // C(a_b)
-        pvalue = seqt::pvalue(first->count, second->count, count);
-        break;
-    case relationship:
-        // add both C(a_b) + C(b_a) to get the full count of adjacent symbols
-        pvalue = seqt::pvalue(first->first->count, first->second->count, first->count + second->count);
-        break;
-    }
-};
-
-void seqt::node::activate_atom() {
-    charge2 = 0;
-
-    if(is_active()) {
+float seqt::node::activate_atom() {
+    if(charge > 0)
         count++;
-        charge2 = 2;
-    }
+
+    return 0;
 }
 
 // we use the charge2 variable to avoid race conditions
-void seqt::node::activate_sequence() {
+float seqt::node::activate_sequence() {
     if(charge == 1 && second->is_active()) {
         count++;
-        charge2 = 2; // fully activated
+        return 2; // fully activated
     } else if(charge == 0 && first->is_active()) {
         // only add half the required charge for activation
-        charge2 = 1;
+        return 1;
     } else {
-        charge2 = 0; // we didn't see the next element in the sequence
+        return 0; // we didn't see the next element in the sequence
     }
 }
 
 // relationships are grandparents of their elements from the elements perspective, but parents of both
 // of the possible sequences a_b and b_a
-void seqt::node::activate_relationship() {
-    charge2 = 0;
-
+float seqt::node::activate_relationship() {
+    float ret = 0;
     if(first->first->is_active()) {
-        charge2++;
-        count += 2;
+        count++;
+        ret = 2;
     }
 
     if(first->second->is_active()) {
-        charge2++;
-        count += 2;
+        count++;
+        ret = 2;
     }
+
+    return ret;
 }
 
-void seqt::node::activate() {
+float seqt::node::activate() {
     // take the charge from children
     // TODO: should this be all the charge
     switch(op) {
     case atom:
-        activate_atom();
-        break;
+        return activate_atom();
     case sequence:
-        activate_sequence();
-        break;
+        return activate_sequence();
     case relationship:
-        activate_relationship();
-        break;
+        return activate_relationship();
     }
 }
 
@@ -347,6 +320,17 @@ void seqt::node::activate() {
 struct seqt::node_pair {
     node_ptr first;
     node_ptr second;
+
+    node_pair() : first(), second() {}
+    node_pair(node_ptr f, node_ptr s) {
+        if(f < s) {
+            first = f; 
+            second = s;
+        } else {
+            first = s;
+            second = f;
+        }
+    }
 
     bool operator<(node_pair const & r) const {
         if(first < r.first) return true;
@@ -359,23 +343,33 @@ struct seqt::node_pair {
 seqt::node_ptr seqt::ptr(size_t offset) {
     return node_ptr(nodes, offset);
 }
+seqt::node_ptr seqt::ptr(node const & n) {
+    return node_ptr(nodes, &n - &nodes[0]);
+}
 
 void seqt::read(bool bit) {
     using namespace std::placeholders;
 
     size_t current_size, index_size;
 
+    // activate charge2 using the charge variables
+    charge_buffer.resize(nodes.size());
+    ::transform(nodes.begin(), nodes.end(), charge_buffer.begin(), bind(&seqt::node::activate, _1));
+
     // add one to the node representing the bit read
-    node_ptr cur = node_ptr(nodes, bit ? 1 : 0);
+    node_ptr cur = ptr(bit ? 1 : 0);
 
     // suggest a new node sequence node
-    for_each_node(bind(&node::compare_with, _1, cur));
+    scrap.resize(nodes.size());
+    ::transform(nodes.begin(), nodes.end(), scrap.begin(), [&](node const & n) {
+        if(is_novel_suggestion(ptr(n), cur))
+            return 1;
+        return 0;
+    });
 
     // consolidate all suggestions
     //   zero out our scrap space
     //   TODO: may not be needed...
-    scrap.resize(nodes.size());
-    ::transform(nodes.begin(), nodes.end(), scrap.begin(), bind(&seqt::is_novel_suggestion, this, _1));
     ::inclusive_scan(scrap.begin(), scrap.end(), scrap.begin(), plus<size_t>());
 
     //   mark all the nodes with suggestions
@@ -398,9 +392,7 @@ void seqt::read(bool bit) {
         // pack the suggested sequences into the collection of nodes
         ::for_each(
             nodes.begin(), nodes.begin() + current_size,
-            bind(&seqt::pack_suggestions, this, _1, node_ptr(nodes, current_size)));
-
-        scrap.resize(nodes.size());
+            bind(&seqt::pack_suggestions, this, _1, cur, nodes.begin() + current_size));
         
         // update our index
         index_size = node_index.size();
@@ -409,27 +401,20 @@ void seqt::read(bool bit) {
         // add the new nodes to the index
         ::for_each(
             nodes.begin(), nodes.begin() + current_size,
-            bind(&seqt::pack_suggestion_index, this, _1, &node_index[0] + index_size));
+            bind(&seqt::pack_suggestion_index, this, _1, cur, node_index.begin() + index_size));
 
         // sort the index
         ::sort(node_index.begin(), node_index.end());
     }
 
-    // activate charge2 using the charge variables
-    for_each_node(&node::activate);
-
     // unbuffer the new charge2 values back into charge
-    for_each_node(&node::unbuffer_charge);
+    ::for_each(charge_buffer.begin(), charge_buffer.end(), [&](float const & charge) {
+        size_t index = &charge - &charge_buffer[0];
+        nodes[index].charge = charge;
+    });
 
     // charge the selected node
     cur->charge += 2;
-
-    // recalculate the pvalue on all the nodes
-    for_each_node(&node::recalculate_pvalue);
-
-    // reset all the suggested_nodes
-    for_each_node(&node::clear_suggestion);
-    
 }
 
 
@@ -439,24 +424,22 @@ void seqt::save(ostream & os) {
     }
 }
 
-bool seqt::is_novel_suggestion(node & n) {
-    if(!n.has_suggestion()) 
+bool seqt::is_novel_suggestion(node_ptr first, node_ptr second) {
+    if(!first->is_active() || abs(first->significance()) < statistical_significance)
         return false;
 
-    node_pair suggest{node_ptr(nodes, &n-&nodes[0]), n.suggested_next};
+    node_pair suggest{first, second};
 
-    // ensure first is less than second
-    if(&n > n.suggested_next)
-        swap(suggest.first, suggest.second);
-
+    // if(suggest.second < suggest.first)
+    //     swap(suggest.first, suggest.second);
+    
     bool exists = binary_search(node_index.begin(), node_index.end(), suggest);
 
     return !exists;
 }
 
-void seqt::pack_suggestions(node & n, node_ptr output_begin) {
+void seqt::pack_suggestions(node & n, node_ptr next, vector<node>::iterator offset) {
     auto index = &n - &nodes[0]; // could use n.index?
-    auto offset = output_begin.offset();
     // node at index will contain a suggestion we want to remember.
     // it will be the scrap[index]-1 index;
     if(index == 0 && scrap[index] == 0)
@@ -468,29 +451,29 @@ void seqt::pack_suggestions(node & n, node_ptr output_begin) {
     // save the suggested node at the scrap[index]-1 index
     auto sug_index = 3*(scrap[index]-1);
 
-    node_ptr a = ptr(offset + sug_index);
-    *a = node(offset + sug_index, node::sequence, ptr(index), n.suggested_next);
+    auto a = offset + sug_index;
+    *a = node(offset - nodes.begin() + sug_index, node::sequence, ptr(n), next);
     a->count = 1;
-    a->charge = a->charge2 = 2;
-    a->recalculate_pvalue();
+    a->charge = 2;
+    // a->recalculate_pvalue();
 
-    node_ptr b = ptr(offset + sug_index + 1);
-    *b = node(offset + sug_index + 1, node::sequence, n.suggested_next, ptr(index));
+    auto b = a + 1;
+    *b = node(offset - nodes.begin() + sug_index + 1, node::sequence, next, ptr(n));
     b->count = 0;
-    b->recalculate_pvalue();
+    // b->recalculate_pvalue();
 
-    node_ptr r = ptr(offset + sug_index + 2);
-    *r = node(offset + sug_index + 2, node::relationship, ptr(offset + sug_index), ptr(offset + sug_index + 1));
-    r->count = n.count + n.suggested_next->count;
-    r->charge = r->charge2 = 1;
+    auto r = a + 2;
+    *r = node(offset - nodes.begin() + sug_index + 2, node::relationship, ptr(*a), ptr(*b));
+    r->count = n.count + next->count;
+    r->charge = 1;
 
-    n.parent = r;
-    n.suggested_next->parent = r;
+    // n.parent = r;
+    // next->parent = r;
 
-    r->recalculate_pvalue();
+    // r->recalculate_pvalue();
 }
 
-void seqt::pack_suggestion_index(node & n, node_pair * output_begin) {
+void seqt::pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::iterator output) {
     node_ptr pn(nodes, &n - &nodes[0]);
     size_t index = pn.offset();
     // node at index will contain a suggestion we want to remember.
@@ -505,13 +488,13 @@ void seqt::pack_suggestion_index(node & n, node_pair * output_begin) {
     auto sug_index = scrap[index]-1;
 
     // add this pair to the index
-    node_pair & a = output_begin[sug_index];
-    a.first = (&n < n.suggested_next) ? pn : n.suggested_next;
-    a.second = (&n < n.suggested_next) ? n.suggested_next : pn;
+    auto a = output + sug_index;
+    a->first = (&n < next) ? pn : next;
+    a->second = (&n < next) ? next : pn;
 }
 
 seqt::seqt() : 
-    next(5), nodes(next)
+    next(2), nodes(next)
 {
     /*
     0 and 1 are atoms
@@ -531,29 +514,27 @@ seqt::seqt() :
     // TODO: zero out everything else
 
     nodes[0] = node(0);  // zero atom
-    nodes[1] = node(1);  // one atom
+    nodes[1] = node(1);  // one atom 
 
     // 0_1 sequence
-    nodes[2] = node(2, node::sequence, node_ptr(nodes, 0), node_ptr(nodes, 1));
+    // nodes[2] = node(2, node::sequence, node_ptr(nodes, 0), node_ptr(nodes, 1));
 
-    // 1_0 sequence
-    nodes[3] = node(3, node::sequence, node_ptr(nodes, 1), node_ptr(nodes, 0));
+    // // 1_0 sequence
+    // nodes[3] = node(3, node::sequence, node_ptr(nodes, 1), node_ptr(nodes, 0));
 
-    // 0^1 relationship (refers to 0_1 and 1_0 and the parent of 0 and 1)
-    nodes[4] = node(4, node::relationship, node_ptr(nodes, 2), node_ptr(nodes, 3));
-    nodes[0].parent = node_ptr(nodes, 4);
-    nodes[1].parent = node_ptr(nodes, 4);
+    // // 0^1 relationship (refers to 0_1 and 1_0 and the parent of 0 and 1)
+    // nodes[4] = node(4, node::relationship, node_ptr(nodes, 2), node_ptr(nodes, 3));
+    // // nodes[0].parent = node_ptr(nodes, 4);
+    // // nodes[1].parent = node_ptr(nodes, 4);
 
-    // 0^1 relationship
-    node_index.push_back({node_ptr(nodes, 0), node_ptr(nodes, 1)});
+    // // 0^1 relationship
+    // node_index.push_back({node_ptr(nodes, 0), node_ptr(nodes, 1)});
 }
 
 
 void seqt::node::save(seqt * s, ostream & os) const {
-    os.write((const char*)&index, sizeof(index));         //  .index
     os.write((const char*)&count, sizeof(count));         //  .count
     os.write((const char*)&charge, sizeof(charge));       //  .charge
-    os.write((const char*)&pvalue, sizeof(pvalue));       //  .pvalue
 
     auto dex = first - &s->nodes[0];
     if(dex < 0) dex = -1;
@@ -563,16 +544,14 @@ void seqt::node::save(seqt * s, ostream & os) const {
     if(dex < 0) dex = -1;
     os.write((const char*)&dex, sizeof(dex));
 
-    dex = parent - &s->nodes[0];
-    if(dex < 0) dex = -1;
-    os.write((const char *)&dex, sizeof(dex));
+    // dex = parent - &s->nodes[0];
+    // if(dex < 0) dex = -1;
+    // os.write((const char *)&dex, sizeof(dex));
 }
 
 void seqt::node::load(seqt * s, istream & is) {
-    is.read((char*)&index, sizeof(index));         //  .index
     is.read((char*)&count, sizeof(count));         //  .count
     is.read((char*)&charge, sizeof(charge));       //  .charge
-    is.read((char*)&pvalue, sizeof(pvalue));       //  .pvalue
 
     auto dex = first.offset();
     is.read((char*)&dex, sizeof(dex));
@@ -583,9 +562,9 @@ void seqt::node::load(seqt * s, istream & is) {
     if(dex < 0) second.reset();
     else second = node_ptr(s->nodes, dex);
 
-    is.read((char *)&dex, sizeof(dex));
-    if(dex < 0) parent.reset();
-    else parent = node_ptr(s->nodes, dex);
+    // is.read((char *)&dex, sizeof(dex));
+    // if(dex < 0) parent.reset();
+    // else parent = node_ptr(s->nodes, dex);
 }
 
 
@@ -688,18 +667,38 @@ int main(int ac, char ** av) {
     istream * is = &cin;
     stringstream line;
 
+    auto p0 = seqt::node_pair(s.ptr(0), s.ptr(1));
+    auto p1 = seqt::node_pair(s.ptr(1), s.ptr(0));
+    auto p2 = seqt::node_pair(s.ptr(0), s.ptr(2));
+    auto p3 = seqt::node_pair(s.ptr(1), s.ptr(2));
+
+    if(p0.first != p1.first)
+        throw std::logic_error("node_pair not ordered properly");
+
+    if(p0 < p1 || p1 < p0)
+        throw std::logic_error("node_pair less operator not working properly");
+
+    if(p2 < p0)
+        throw std::logic_error("node_pair less operator not working");
+
+    if(p3 < p2)
+        throw std::logic_error("node_pair less error");
+    
+    if(p3 < p0)
+        throw std::logic_error("node_pair");
+
     if(ac > 2 && string(av[ac-2]) == "-") {
         line = stringstream(string(av[ac-1]));
         is = &line;
     }
 
     for(;;) {
-        char c = is->get();
+        unsigned char c = is->get();
         
         if(is->eof())
             break;
 
-        char mask = 0x80;
+        unsigned char mask = 0x80;
         while(mask != 0) {
             s.read(c & mask);
             mask >>= 1;
