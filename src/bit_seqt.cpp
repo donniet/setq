@@ -10,6 +10,18 @@
 #include <string>
 #include <sstream>
 
+#if __clang__ && __APPLE__
+// disable parallel exeuction for now
+#else
+#  define EXEUCUTION_PARALLEL
+#endif
+
+#if EXECUTION_PARALLEL
+#  define PAR_UNSEQ std::exeuction::par_unseq,
+#else
+#  define PAR_UNSEQ
+#endif
+
 const float statistical_significance = 3.; // standard deviations
 
 using namespace std;
@@ -23,7 +35,9 @@ struct seqt {
     vector<node> nodes;
     vector<node_pair> node_index;
     vector<node_pair> suggested;
-    vector<size_t> scrap;
+    vector<size_t> scrap_nodes;
+    vector<size_t> scrap_index;
+
     vector<float> charge_buffer;
 
     static float pvalue(size_t first, size_t second, size_t count_sequence);
@@ -85,6 +99,8 @@ private:
     size_t offset_;
 public:
     node_ptr() : nodes_(nullptr), offset_(0) { }
+    static node_ptr null() { return node_ptr(); }
+
     node_ptr(vector<node> & n, size_t o) : nodes_(&n), offset_(o) { }
     node_ptr(node_ptr const & r) : nodes_(r.nodes_), offset_(r.offset_) { }
     node_ptr(node_ptr && r) : nodes_(r.nodes_), offset_(r.offset_) {
@@ -157,10 +173,7 @@ struct seqt::node {
     node_ptr second;
 
     node() { } // no initialization for speed
-    node(size_t dex) : 
-        op(atom), count(0), charge(0), first(), second()
-    { }
-    node(size_t dex, node_operation o, node_ptr f, node_ptr s) :
+    node(node_operation o, node_ptr f, node_ptr s) :
         op(o), count(0), charge(0), first(f), second(s)
     { }
     node(node const & r) : 
@@ -215,10 +228,17 @@ struct seqt::node {
 };
 
 bool seqt::node_ptr::operator<(node_ptr const & r) const {
-    return &nodes_->operator[](0) + offset_ < &r.nodes_->operator[](0) + r.offset_;
+    // return &nodes_->operator[](0) + offset_ < &r.nodes_->operator[](0) + r.offset_;
+    // it's fine to just use the nodes_ pointer as the reference for a less than comparison
+    // and it avoids a null check
+    return nodes_ + offset_ < r.nodes_ + r.offset_;
+    
 }
 bool seqt::node_ptr::operator<=(node_ptr const & r) const {
-    return &nodes_->operator[](0) + offset_ <= &r.nodes_->operator[](0) + r.offset_;
+    // return &nodes_->operator[](0) + offset_ <= &r.nodes_->operator[](0) + r.offset_;
+    // it's fine to just use the nodes_ pointer as the reference for a less than comparison
+    // and it avoids a null check
+    return nodes_ + offset_ <= r.nodes_ + r.offset_;
 }
 seqt::node & seqt::node_ptr::operator*() const {
     return nodes_->operator[](offset_);
@@ -227,7 +247,8 @@ seqt::node * seqt::node_ptr::operator->() const {
     return &nodes_->operator[](offset_);
 }
 seqt::node_ptr::operator node*() const {
-    return nodes_ == nullptr ? nullptr : &nodes_->operator[](0) + offset_;
+    // we have to do a null check here I believe
+    return is_null() ? nullptr : &nodes_->operator[](0) + offset_;
 }
 bool seqt::node_ptr::is_null() const {
     return nodes_ == nullptr || offset_ >= nodes_->size();
@@ -354,23 +375,39 @@ void seqt::read(bool bit) {
 
     // activate charge2 using the charge variables
     charge_buffer.resize(nodes.size());
-    ::transform(nodes.begin(), nodes.end(), charge_buffer.begin(), bind(&seqt::node::activate, _1));
+    transform(PAR_UNSEQ nodes.begin(), nodes.end(), charge_buffer.begin(), bind(&seqt::node::activate, _1));
 
     // add one to the node representing the bit read
     node_ptr cur = ptr(bit ? 1 : 0);
 
     // suggest a new node sequence node
-    scrap.resize(nodes.size());
-    ::transform(nodes.begin(), nodes.end(), scrap.begin(), [&](node const & n) {
-        if(is_novel_suggestion(ptr(n), cur))
-            return 1;
-        return 0;
+    scrap_nodes.resize(nodes.size());
+    scrap_index.resize(nodes.size());
+
+    for_each(PAR_UNSEQ nodes.begin(), nodes.end(), [&](node const & n) {
+        size_t dex = &n - &nodes[0];
+    
+        if(!is_novel_suggestion(ptr(n), cur)) {
+            scrap_nodes[dex] = 0;
+            scrap_index[dex] = 0;
+            return;
+        }
+
+        scrap_index[dex] = 1;
+
+        if(&n == &*cur) {
+            scrap_nodes[dex] = 1;
+            return;
+        }
+
+        scrap_nodes[dex] = 3;
     });
 
     // consolidate all suggestions
     //   zero out our scrap space
     //   TODO: may not be needed...
-    ::inclusive_scan(scrap.begin(), scrap.end(), scrap.begin(), plus<size_t>());
+    inclusive_scan(PAR_UNSEQ scrap_nodes.begin(), scrap_nodes.end(), scrap_nodes.begin(), plus<size_t>());
+    inclusive_scan(PAR_UNSEQ scrap_index.begin(), scrap_index.end(), scrap_index.begin(), plus<size_t>());
 
     //   mark all the nodes with suggestions
     // ::transform_inclusive_scan(
@@ -380,26 +417,34 @@ void seqt::read(bool bit) {
     //     [&](node & n) -> size_t { return is_novel_suggestion(n) ? 1 : 0; });
 
     // get the total suggestions from the last element of our scrap
-    size_t suggestions = scrap.back();
+    size_t nodes_increase = scrap_nodes.back();
+    size_t index_increase = scrap_index.back();
 
-    if(suggestions > 0) {
+    // now find how many individual sequences we need to add
+    // inclusive_scan(PAR_UNSEQ 
+    //     scrap.begin(), scrap.end(), scrap.begin(), 0, [&](size_t const & a, size_t const & b) -> size_t {
+    //     return 0;
+    // });
+
+
+    if(nodes_increase > 0) {
         // create space for all the suggestions
         current_size = nodes.size();
 
         // resize the nodes to make room for the new ones
-        nodes.resize(nodes.size() + 3*suggestions);
+        nodes.resize(nodes.size() + nodes_increase);
         
         // pack the suggested sequences into the collection of nodes
-        ::for_each(
+        for_each(PAR_UNSEQ
             nodes.begin(), nodes.begin() + current_size,
             bind(&seqt::pack_suggestions, this, _1, cur, nodes.begin() + current_size));
         
         // update our index
         index_size = node_index.size();
-        node_index.resize(index_size + suggestions);
+        node_index.resize(index_size + index_increase);
 
         // add the new nodes to the index
-        ::for_each(
+        for_each(PAR_UNSEQ
             nodes.begin(), nodes.begin() + current_size,
             bind(&seqt::pack_suggestion_index, this, _1, cur, node_index.begin() + index_size));
 
@@ -408,7 +453,7 @@ void seqt::read(bool bit) {
     }
 
     // unbuffer the new charge2 values back into charge
-    ::for_each(charge_buffer.begin(), charge_buffer.end(), [&](float const & charge) {
+    for_each(PAR_UNSEQ charge_buffer.begin(), charge_buffer.end(), [&](float const & charge) {
         size_t index = &charge - &charge_buffer[0];
         nodes[index].charge = charge;
     });
@@ -442,33 +487,40 @@ void seqt::pack_suggestions(node & n, node_ptr next, vector<node>::iterator offs
     auto index = &n - &nodes[0]; // could use n.index?
     // node at index will contain a suggestion we want to remember.
     // it will be the scrap[index]-1 index;
-    if(index == 0 && scrap[index] == 0)
+    if(index == 0 && scrap_nodes[index] == 0)
         return; // nothing to do
 
-    if(index > 0 && scrap[index] == scrap[index-1])
+    if(index > 0 && scrap_nodes[index] == scrap_nodes[index-1])
         return; // this index does not have a novel suggestion
     
     // save the suggested node at the scrap[index]-1 index
-    auto sug_index = 3*(scrap[index]-1);
+    int num = 1;
+    if(index == 0)
+        num = scrap_nodes[index];
+    else
+        num = scrap_nodes[index] - scrap_nodes[index-1];
+
+    auto sug_index = scrap_nodes[index] - num;
 
     auto a = offset + sug_index;
-    *a = node(offset - nodes.begin() + sug_index, node::sequence, ptr(n), next);
+    *a = node(node::sequence, ptr(n), next);
     a->count = 1;
-    a->charge = 2;
-    // a->recalculate_pvalue();
+    a->charge = 0;
 
-    auto b = a + 1;
-    *b = node(offset - nodes.begin() + sug_index + 1, node::sequence, next, ptr(n));
-    b->count = 0;
-    // b->recalculate_pvalue();
+    if(num == 3) {
+        auto b = a + 1;
+        *b = node(node::sequence, next, ptr(n));
+        b->count = 0;
+        // b->recalculate_pvalue();
 
-    auto r = a + 2;
-    *r = node(offset - nodes.begin() + sug_index + 2, node::relationship, ptr(*a), ptr(*b));
-    r->count = n.count + next->count;
-    r->charge = 1;
-
-    // n.parent = r;
-    // next->parent = r;
+        auto r = a + 2;
+        *r = node(node::relationship, ptr(*a), ptr(*b));
+        r->count = n.count + next->count;
+        r->charge = 0;
+    
+        // n.parent = r;
+        // next->parent = r;
+    }
 
     // r->recalculate_pvalue();
 }
@@ -478,23 +530,21 @@ void seqt::pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::ite
     size_t index = pn.offset();
     // node at index will contain a suggestion we want to remember.
     // it will be the scrap[index]-1 index;
-    if(index == 0 && scrap[index] == 0)
+    if(index == 0 && scrap_index[index] == 0)
         return; // nothing to do
 
-    if(index > 0 && scrap[index] == scrap[index-1])
+    if(index > 0 && scrap_index[index] == scrap_index[index-1])
         return; // this index does not have a novel suggestion
     
     // save the suggested node at the scrap[index]-1 index
-    auto sug_index = scrap[index]-1;
+    auto sug_index = scrap_index[index]-1;
 
     // add this pair to the index
     auto a = output + sug_index;
-    a->first = (&n < next) ? pn : next;
-    a->second = (&n < next) ? next : pn;
+    *a = node_pair(ptr(n), next);
 }
 
-seqt::seqt() : 
-    next(2), nodes(next)
+seqt::seqt()
 {
     /*
     0 and 1 are atoms
@@ -512,9 +562,10 @@ seqt::seqt() :
     */
 
     // TODO: zero out everything else
-
-    nodes[0] = node(0);  // zero atom
-    nodes[1] = node(1);  // one atom 
+    nodes.resize(2);
+    nodes[0] = node(node::atom, node_ptr::null(), node_ptr::null());  // zero atom
+    nodes[1] = node(node::atom, node_ptr::null(), node_ptr::null());  // one atom 
+    next = nodes.size();
 
     // 0_1 sequence
     // nodes[2] = node(2, node::sequence, node_ptr(nodes, 0), node_ptr(nodes, 1));
@@ -572,88 +623,9 @@ void seqt::node::load(seqt * s, istream & is) {
 
 void seqt::for_each_node(function<void(node &)> f) 
 {
-
-#if(__clang__ && __APPLE__)
-    std::for_each(nodes.begin(), nodes.end(), f);
-#else
-    std::for_each(execution::par_unseq,
-        nodes.begin(), nodes.end(),
-        f);
-#endif
+    std::for_each(PAR_UNSEQ nodes.begin(), nodes.end(), f);
 }
 
-template<typename OutputIterator, typename T>
-void fill(OutputIterator begin, OutputIterator end, T && value)
-{
-
-#if(__clang__ && __APPLE__)
-        std::fill(begin, end, value);
-#else
-        std::fill(execution::par_unseq, begin, end, value);
-#endif
-
-}
-
-template<typename OutputIterator>
-void sort(OutputIterator begin, OutputIterator end)
-{
-
-#if(__clang__ && __APPLE__)
-        std::sort(begin, end);
-#else
-        std::sort(execution::par_unseq, begin, end);
-#endif
-
-}
-
-template<typename OutputIterator, typename UnaryOp>
-void for_each(OutputIterator begin, OutputIterator end, UnaryOp && value)
-{
-
-#if(__clang__ && __APPLE__)
-        std::for_each(begin, end, value);
-#else
-        std::for_each(execution::par_unseq, begin, end, value);
-#endif
-
-}
-
-template<typename InputIterator, typename OutputIterator, typename BinaryOp, typename UnaryOp>
-void transform_inclusive_scan(InputIterator begin, InputIterator end, OutputIterator out, 
-                              BinaryOp && add, UnaryOp && func)
-{
-
-#if(__clang__ && __APPLE__)
-        std::transform_inclusive_scan(begin, end, out, add, func);
-#else
-        std::transform_inclusive_scan(execution::par_unseq, begin, end, out, add, func);
-#endif
-
-}
-
-template<typename InputIterator, typename OutputIterator, typename UnaryOp>
-void transform(InputIterator begin, InputIterator end, OutputIterator out, UnaryOp && func)
-{
-
-#if(__clang__ && __APPLE__)
-        std::transform(begin, end, out, func);
-#else
-        std::transform(execution::par_unseq, begin, end, out, func);
-#endif
-
-}
-
-template<typename InputIterator, typename OutputIterator, typename BinaryOp>
-void inclusive_scan(InputIterator begin, InputIterator end, OutputIterator out, BinaryOp && add)
-{
-
-#if(__clang__ && __APPLE__)
-        std::inclusive_scan(begin, end, out, add);
-#else
-        std::inclusive_scan(execution::par_unseq, begin, end, out, add);
-#endif
-
-}
 
 
 
