@@ -47,7 +47,7 @@ struct seqt {
 
     void save(ostream & os);
     void read(bool bit);
-    void for_each_node(std::function<void(node &)>);
+    void prune(size_t max_nodes);
     bool is_novel_suggestion(node_ptr first, node_ptr second);
     void pack_suggestions(node & n, node_ptr next, vector<node>::iterator output_begin);
     void pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::iterator output_begin);
@@ -281,8 +281,9 @@ float seqt::node::significance() const {
     case atom:
         return numeric_limits<float>::max(); // atoms are infinitely significant
     case sequence:
-    case relationship:
         return sequence_stddevs(first->count, second->count, count);
+    case relationship:
+        return sequence_stddevs(first->first->count, first->second->count, first->count + second->count);
     }
 }
 
@@ -341,9 +342,10 @@ float seqt::node::activate() {
 struct seqt::node_pair {
     node_ptr first;
     node_ptr second;
+    node_ptr parent;
 
-    node_pair() : first(), second() {}
-    node_pair(node_ptr f, node_ptr s) {
+    node_pair() : first(), second(), parent() {}
+    node_pair(node_ptr f, node_ptr s, node_ptr p) : parent(p) {
         if(f < s) {
             first = f; 
             second = s;
@@ -366,6 +368,48 @@ seqt::node_ptr seqt::ptr(size_t offset) {
 }
 seqt::node_ptr seqt::ptr(node const & n) {
     return node_ptr(nodes, &n - &nodes[0]);
+}
+
+void seqt::prune(size_t max_nodes) {
+    // first calculate a usefulness of each node
+    vector<float> use(nodes.size());
+    scrap_nodes.resize(nodes.size());
+
+    //   get an iota equal to the number of nodes
+    for_each(PAR_UNSEQ nodes.begin(), nodes.end(), [&](node const & n) {
+        size_t dex = &n - &nodes[0];
+
+        // count the dependencies;
+        scrap_nodes[dex] = dex;
+    });
+
+    //   save the usefulness of each node
+    for_each(PAR_UNSEQ nodes.begin(), nodes.end(), [&](node const & n) {
+        size_t dex = &n - &nodes[0];
+
+        switch(n.op) {
+        case node::atom:
+            use[dex] = numeric_limits<float>::max(); // infinitely useful
+            break;
+        case node::sequence:
+            use[dex] = sequence_stddevs(n.first->count, n.second->count, n.count);
+            break;
+        case node::relationship:
+            use[dex] = -sequence_stddevs(n.first->first->count, n.first->second->count, 
+                                         n.first->count + n.second->count);
+            break;
+        }
+    });
+
+    // flow the usefulness values down through child nodes
+    // (if a parent node is useful, then the child's usefulness should be greater)
+
+    // sort the usefulness values and find the cutoff
+
+    // remove the least useful nodes
+
+    // could we combine or restructure the nodes also?  so far this code creates essentially
+    // a linked list of bits.  
 }
 
 void seqt::read(bool bit) {
@@ -473,7 +517,7 @@ bool seqt::is_novel_suggestion(node_ptr first, node_ptr second) {
     if(!first->is_active() || abs(first->significance()) < statistical_significance)
         return false;
 
-    node_pair suggest{first, second};
+    node_pair suggest{first, second, node_ptr()};
 
     // if(suggest.second < suggest.first)
     //     swap(suggest.first, suggest.second);
@@ -541,7 +585,7 @@ void seqt::pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::ite
 
     // add this pair to the index
     auto a = output + sug_index;
-    *a = node_pair(ptr(n), next);
+    *a = node_pair(ptr(n), next, node_ptr::null());
 }
 
 seqt::seqt()
@@ -619,18 +663,31 @@ void seqt::node::load(seqt * s, istream & is) {
 }
 
 
+void print_seqt(seqt const & s, ostream & os) {
+    os << setw(12) << 0 << "| atm " << setw(12) << s.nodes[0].count << "\n";
+    os << setw(12) << 1 << "| atm " << setw(12) << s.nodes[1].count << "\n";
 
+    for(int i = 2; i < s.nodes.size(); i++) {
+        seqt::node const & n = s.nodes[i];
+        os  << setw(12) << i;
 
-void seqt::for_each_node(function<void(node &)> f) 
-{
-    std::for_each(PAR_UNSEQ nodes.begin(), nodes.end(), f);
+        switch(n.op) {
+        case seqt::node::sequence:
+            os  << "| seq " << setw(12) << n.count << " : " 
+                << setw(12) << sequence_stddevs(n.first->count, n.second->count, n.count) << "% ("
+                << setw(12) << n.first.offset() << " ," << setw(12) << n.second.offset() << " )\n";
+            break;
+        case seqt::node::relationship:
+            os  << "| rel " << setw(12) << n.count << " : " 
+                << setw(12) << sequence_stddevs(n.first->first->count, n.first->second->count, n.first->count + n.second->count) << "%  "
+                << setw(12) << n.first->first.offset() << " ~" << setw(12) << n.first->second.offset() << "  \n";
+            break;
+        default:
+            break;
+        }
+    }
+
 }
-
-
-
-
-
-
 
 
 int main(int ac, char ** av) {
@@ -639,10 +696,10 @@ int main(int ac, char ** av) {
     istream * is = &cin;
     stringstream line;
 
-    auto p0 = seqt::node_pair(s.ptr(0), s.ptr(1));
-    auto p1 = seqt::node_pair(s.ptr(1), s.ptr(0));
-    auto p2 = seqt::node_pair(s.ptr(0), s.ptr(2));
-    auto p3 = seqt::node_pair(s.ptr(1), s.ptr(2));
+    auto p0 = seqt::node_pair(s.ptr(0), s.ptr(1), seqt::node_ptr::null());
+    auto p2 = seqt::node_pair(s.ptr(0), s.ptr(2), seqt::node_ptr::null());
+    auto p1 = seqt::node_pair(s.ptr(1), s.ptr(0), seqt::node_ptr::null());
+    auto p3 = seqt::node_pair(s.ptr(1), s.ptr(2), seqt::node_ptr::null());
 
     if(p0.first != p1.first)
         throw std::logic_error("node_pair not ordered properly");
@@ -678,9 +735,11 @@ int main(int ac, char ** av) {
     }
 
 
-    fstream file("seqt.bin", ios::binary | ios::trunc | ios::out);
-    s.save(file);
-    file.close();
+    // fstream file("seqt.bin", ios::binary | ios::trunc | ios::out);
+    // s.save(file);
+    // file.close();
+    print_seqt(s, cout);
+    cout << endl;
 
     // dump out the seqt
 }
