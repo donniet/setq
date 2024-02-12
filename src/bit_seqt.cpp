@@ -36,7 +36,12 @@ struct seqt {
     vector<node_pair> node_index;
     vector<node_pair> suggested;
     vector<size_t> scrap_nodes;
-    vector<size_t> scrap_index;
+    vector<size_t> scrap_index[2];
+    int active_scrap_id;
+
+    vector<size_t> & active_index() { return scrap_index[active_scrap_id]; }
+    vector<size_t> & preactive_index() { return scrap_index[1-active_scrap_id]; }
+    void rotate_active_index() { active_scrap_id = (active_scrap_id + 1) % 2; }
 
     vector<float> charge_buffer;
 
@@ -48,6 +53,7 @@ struct seqt {
     void save(ostream & os);
     void read(bool bit);
     void prune(size_t max_nodes);
+    bool pair_exists(node_ptr first, node_ptr second);
     bool is_novel_suggestion(node_ptr first, node_ptr second);
     void pack_suggestions(node & n, node_ptr next, vector<node>::iterator output_begin);
     void pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::iterator output_begin);
@@ -167,7 +173,7 @@ struct seqt::node {
         atom, sequence, relationship
     } op;
     size_t count;
-    int charge;
+    float charge;
 
     node_ptr first;
     node_ptr second;
@@ -206,25 +212,11 @@ struct seqt::node {
         return *this;
     }
 
-    // node() :
-    //     index(0), count(0), charge(0), charge2(0), pvalue(0.),
-    //     first(nullptr), second(nullptr), parent(nullptr)
-    // { }
-
     void save(seqt * s, ostream & os) const;
     void load(seqt * s, istream & is);
-    // void multiply_charge(int c) { charge *= c; }
-    // void rotate_charge() { charge *= -2; } // 
-    // void reset_charge() { charge = 0; }
-    // void buffer_charge() { charge2 = charge; }
+
     float significance() const;
     float activate();
-    float activate_atom();
-    float activate_sequence();
-    float activate_relationship();
-    // void unbuffer_charge() { charge = charge2; };
-    // void recalculate_pvalue();
-    bool is_active() { return charge > 1; }
 };
 
 bool seqt::node_ptr::operator<(node_ptr const & r) const {
@@ -287,54 +279,29 @@ float seqt::node::significance() const {
     }
 }
 
-float seqt::node::activate_atom() {
-    if(charge > 0)
-        count++;
-
-    return 0;
-}
-
-// we use the charge2 variable to avoid race conditions
-float seqt::node::activate_sequence() {
-    if(charge == 1 && second->is_active()) {
-        count++;
-        return 2; // fully activated
-    } else if(charge == 0 && first->is_active()) {
-        // only add half the required charge for activation
-        return 1;
-    } else {
-        return 0; // we didn't see the next element in the sequence
-    }
-}
-
-// relationships are grandparents of their elements from the elements perspective, but parents of both
-// of the possible sequences a_b and b_a
-float seqt::node::activate_relationship() {
-    float ret = 0;
-    if(first->first->is_active()) {
-        count++;
-        ret = 2;
-    }
-
-    if(first->second->is_active()) {
-        count++;
-        ret = 2;
-    }
-
-    return ret;
-}
-
 float seqt::node::activate() {
     // take the charge from children
     // TODO: should this be all the charge
     switch(op) {
     case atom:
-        return activate_atom();
+        // atoms are activated by the read function
+        break;
     case sequence:
-        return activate_sequence();
+        if(second->charge >= 1. && first->charge >= 0.5 && first->charge < 1.) {
+            count++;
+            // TODO: I don't know if we should divide by 2 here
+            return charge + 1.;
+        }
+        break;
     case relationship:
-        return activate_relationship();
+        if(first->first->charge >= 1. || first->second->charge >= 1.) {
+            count++;
+            return charge + 1.;
+        }
+        break;
     }
+
+    return charge;
 }
 
 
@@ -415,95 +382,185 @@ void seqt::prune(size_t max_nodes) {
 void seqt::read(bool bit) {
     using namespace std::placeholders;
 
-    size_t current_size, index_size;
+    size_t current_size, index_size, active_count, preactive_count;
 
-    // activate charge2 using the charge variables
+    scrap_nodes.resize(nodes.size());
     charge_buffer.resize(nodes.size());
-    transform(PAR_UNSEQ nodes.begin(), nodes.end(), charge_buffer.begin(), bind(&seqt::node::activate, _1));
 
     // add one to the node representing the bit read
     node_ptr cur = ptr(bit ? 1 : 0);
+    cur->charge += 1.; // charge the atom
+    scrap_nodes[cur.offset()] = 1;
+    size_t changed = 1;
 
-    // suggest a new node sequence node
-    scrap_nodes.resize(nodes.size());
-    scrap_index.resize(nodes.size());
+    // activate until all nodes to be activated have been
+    while(changed > 0) {
+        // activate charge2 using the charge variables
+        // TODO: filter out the nodes that already changed
+        for_each(PAR_UNSEQ nodes.begin(), nodes.end(),
+        [&](node & n) {
+            size_t dex = &n - &nodes[0];
 
-    for_each(PAR_UNSEQ nodes.begin(), nodes.end(), [&](node const & n) {
-        size_t dex = &n - &nodes[0];
-    
-        if(!is_novel_suggestion(ptr(n), cur)) {
-            scrap_nodes[dex] = 0;
-            scrap_index[dex] = 0;
-            return;
-        }
+            charge_buffer[dex] = n.activate();
+            scrap_nodes[dex] = (charge_buffer[dex] != n.charge ? 1 : 0);  // did this node change?
+        });
 
-        scrap_index[dex] = 1;
+        // unbuffer the new charge2 values back into charge
+        // TODO: should the charge of child nodes go negative or somehow
+        //   signal that a parent has picked up this node?
+        for_each(PAR_UNSEQ charge_buffer.begin(), charge_buffer.end(), 
+        [&](float const & charge) {
+            size_t index = &charge - &charge_buffer[0];
+            nodes[index].charge = charge;
+        });
 
-        if(&n == &*cur) {
-            scrap_nodes[dex] = 1;
-            return;
-        }
-
-        scrap_nodes[dex] = 3;
-    });
-
-    // consolidate all suggestions
-    //   zero out our scrap space
-    //   TODO: may not be needed...
-    inclusive_scan(PAR_UNSEQ scrap_nodes.begin(), scrap_nodes.end(), scrap_nodes.begin(), plus<size_t>());
-    inclusive_scan(PAR_UNSEQ scrap_index.begin(), scrap_index.end(), scrap_index.begin(), plus<size_t>());
-
-    //   mark all the nodes with suggestions
-    // ::transform_inclusive_scan(
-    //     nodes.begin(), nodes.end(),
-    //     scrap.begin(), 
-    //     plus<size_t>(),
-    //     [&](node & n) -> size_t { return is_novel_suggestion(n) ? 1 : 0; });
-
-    // get the total suggestions from the last element of our scrap
-    size_t nodes_increase = scrap_nodes.back();
-    size_t index_increase = scrap_index.back();
-
-    // now find how many individual sequences we need to add
-    // inclusive_scan(PAR_UNSEQ 
-    //     scrap.begin(), scrap.end(), scrap.begin(), 0, [&](size_t const & a, size_t const & b) -> size_t {
-    //     return 0;
-    // });
-
-
-    if(nodes_increase > 0) {
-        // create space for all the suggestions
-        current_size = nodes.size();
-
-        // resize the nodes to make room for the new ones
-        nodes.resize(nodes.size() + nodes_increase);
-        
-        // pack the suggested sequences into the collection of nodes
-        for_each(PAR_UNSEQ
-            nodes.begin(), nodes.begin() + current_size,
-            bind(&seqt::pack_suggestions, this, _1, cur, nodes.begin() + current_size));
-        
-        // update our index
-        index_size = node_index.size();
-        node_index.resize(index_size + index_increase);
-
-        // add the new nodes to the index
-        for_each(PAR_UNSEQ
-            nodes.begin(), nodes.begin() + current_size,
-            bind(&seqt::pack_suggestion_index, this, _1, cur, node_index.begin() + index_size));
-
-        // sort the index
-        ::sort(node_index.begin(), node_index.end());
+        // add up all the changed nodes
+        inclusive_scan(PAR_UNSEQ scrap_nodes.begin(), scrap_nodes.end(), scrap_nodes.begin());
+        changed = scrap_nodes.back();
     }
 
-    // unbuffer the new charge2 values back into charge
-    for_each(PAR_UNSEQ charge_buffer.begin(), charge_buffer.end(), [&](float const & charge) {
-        size_t index = &charge - &charge_buffer[0];
-        nodes[index].charge = charge;
+    // find all the active nodes
+    transform(PAR_UNSEQ nodes.begin(), nodes.end(), scrap_nodes.begin(),
+    [&](node const & n) {
+        if(n.charge >= 1.) 
+            return 1;
+        return 0;
     });
 
+    inclusive_scan(PAR_UNSEQ scrap_nodes.begin(), scrap_nodes.end(), scrap_nodes.begin());
+    active_count = scrap_nodes.back();
+
+    // rotate active index;
+    rotate_active_index();
+
+    // ensure enough space in the scrap_index for the active node indices.
+    if(active_index().size() < active_count)
+        active_index().resize(active_count);
+
+    // pack the active node indexes into node_index
+    for_each(PAR_UNSEQ scrap_nodes.begin(), scrap_nodes.end(),
+    [&](size_t const & i) {
+        size_t dex = &i - &scrap_nodes[0];
+        
+        if(i == 0 || (dex > 0 && i == scrap_nodes[dex-1]))
+            return;
+
+        active_index()[i] = dex;
+    });
+
+    // now we will create any new sequences that do not exist
+    // but I don't know how to do this without it being NxM, so 
+    // just reserviing NxM for now and we'll optimize later...
+    // TODO: Maybe this could be probabilistic?  choose N potential pairs
+    //  randomly and check those.  N can be chosen based on a certain bitrate
+    //  we are aiming at.
+    vector<size_t> pot(active_index().size() * preactive_index().size());
+
+    if(pot.size() > 0) {
+        for_each(PAR_UNSEQ pot.begin(), pot.end(),
+        [&](size_t & dex) {
+            size_t i = &dex - &pot[0];
+            size_t active_j = i / active_index().size();
+            size_t preact_k = i % active_index().size();
+
+            node_ptr a(active_index()[active_j]), p(preactive_index()[preact_k]);
+
+            if(pair_exists(ptr(active_index()[active_j]), ptr(preactive_index()[preact_k]))) {
+                return;
+            }
+
+            
+        });
+    }
+
+    // this loops through in NxM and counts how many already exist
+    for_each(PAR_UNSEQ active_index().begin(), active_index().end(),
+    [&](size_t const & dex) {
+        size_t i = &dex - &active_index()[0];
+        size_t pres = 0;
+        for(size_t p : preactive_index()) {
+            if(pair_exists(ptr(p), ptr(dex)))
+                continue;
+            pres++;
+        }
+        scrap_nodes[i] = pres;
+    });
+
+    // add up how many potential new nodes we should create
+    size_t new_nodes = 0;
+    inclusive_scan(PAR_UNSEQ scrap_nodes.begin(), scrap_nodes.begin() + active_index().size(), scrap_nodes.begin());
+    new_nodes = scrap_nodes[active_index().size() - 1];
+
+    // TODO: we know how many nodes, but we don't know which ones
+    // and in parallel I don't think this logic will work
+    // we might have to allocate N^2 space to handle the possibility of
+    // any node being related to any other node...
+    // it could be active_index().size() x preactive_index().size()
+    // what is the largest number N*M such that N + M = C a constant?
+    // max(n*m | n + m = c)?  n = (c-m), n * m == n * (c-n); 
+    // nc - n^2.  max(nc-n^2) c - 2n == 0; n = c/2
+    // so just like we thought, the maximum value will occur if half the nodes
+    // are active, and be equal to c^2/4
+
+
+    
+
+
+    // for_each(PAR_UNSEQ nodes.begin(), nodes.end(), [&](node const & n) {
+    //     size_t dex = &n - &nodes[0];
+    
+    //     if(!is_novel_suggestion(ptr(n), cur)) {
+    //         scrap_nodes[dex] = 0;
+    //         scrap_index[dex] = 0;
+    //         return;
+    //     }
+
+    //     scrap_index[dex] = 1;
+
+    //     if(&n == &*cur) {
+    //         scrap_nodes[dex] = 1;
+    //         return;
+    //     }
+
+    //     scrap_nodes[dex] = 3;
+    // });
+
+    // inclusive_scan(PAR_UNSEQ scrap_nodes.begin(), scrap_nodes.end(), scrap_nodes.begin(), plus<size_t>());
+    // inclusive_scan(PAR_UNSEQ scrap_index.begin(), scrap_index.end(), scrap_index.begin(), plus<size_t>());
+
+    // // get the total suggestions from the last element of our scrap
+    // size_t nodes_increase = scrap_nodes.back();
+    // size_t index_increase = scrap_index.back();
+
+
+    // if(nodes_increase > 0) {
+    //     // create space for all the suggestions
+    //     current_size = nodes.size();
+
+    //     // resize the nodes to make room for the new ones
+    //     nodes.resize(nodes.size() + nodes_increase);
+        
+    //     // pack the suggested sequences into the collection of nodes
+    //     for_each(PAR_UNSEQ
+    //         nodes.begin(), nodes.begin() + current_size,
+    //         bind(&seqt::pack_suggestions, this, _1, cur, nodes.begin() + current_size));
+        
+    //     // update our index
+    //     index_size = node_index.size();
+    //     node_index.resize(index_size + index_increase);
+
+    //     // add the new nodes to the index
+    //     for_each(PAR_UNSEQ
+    //         nodes.begin(), nodes.begin() + current_size,
+    //         bind(&seqt::pack_suggestion_index, this, _1, cur, node_index.begin() + index_size));
+
+    //     // sort the index
+    //     sort(node_index.begin(), node_index.end());
+    // }
+
+
     // charge the selected node
-    cur->charge += 2;
+    // cur->charge += 2;
 }
 
 
@@ -513,8 +570,12 @@ void seqt::save(ostream & os) {
     }
 }
 
+bool seqt::pair_exists(node_ptr first, node_ptr second) {
+    return binary_search(node_index.begin(), node_index.end(), node_pair(first, second, node_ptr::null()));
+}
+
 bool seqt::is_novel_suggestion(node_ptr first, node_ptr second) {
-    if(!first->is_active() || abs(first->significance()) < statistical_significance)
+    if(first->charge < 1. || abs(first->significance()) < statistical_significance)
         return false;
 
     node_pair suggest{first, second, node_ptr()};
@@ -588,7 +649,7 @@ void seqt::pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::ite
     *a = node_pair(ptr(n), next, node_ptr::null());
 }
 
-seqt::seqt()
+seqt::seqt() : active_scrap_id(0)
 {
     /*
     0 and 1 are atoms
