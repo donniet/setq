@@ -393,6 +393,7 @@ void seqt::read(bool bit) {
     // add one to the node representing the bit read
     node_ptr cur = ptr(bit ? 1 : 0);
     cur->charge += 1.; // charge the atom
+    cur->count++;
 
 
     // this will keep track of the nodes that changed
@@ -407,6 +408,8 @@ void seqt::read(bool bit) {
         for_each(PAR_UNSEQ nodes.begin(), nodes.end(),
         [&](node & n) {
             size_t dex = &n - &nodes[0];
+
+            cout << "nodes[" << dex << "].charge = " << n.charge << endl;
 
             // don't re-activate an already activated node
             if(nodes_active[dex])
@@ -468,11 +471,13 @@ void seqt::read(bool bit) {
     [&](size_t const & active_i) {
         size_t dex = &active_i - &active_index()[0];
 
+        // cout << "nodes[" << dex << "].charge = " << nodes[dex].charge << endl;
+
         // is this node in sequence with itself?
         // and is that node
-        if( nodes[active_i].charge >= 1.5 && 
-           !pair_exists(ptr(active_i), ptr(active_i)) &&
-            abs(nodes[active_i].significance()) > statistical_significance)
+        if( nodes[dex].charge >= 1.5 && 
+           !pair_exists(ptr(dex), ptr(dex)) &&
+            abs(nodes[dex].significance()) > statistical_significance)
 
             nodes_active[dex] = 1;
         else
@@ -521,6 +526,9 @@ void seqt::read(bool bit) {
             size_t i = &c - &nodes_active[0];
             size_t active_j = i / active_index().size();
             size_t preact_k = i % active_index().size();
+
+            if(active_j == preact_k)
+                return;
 
             node_ptr a(nodes, active_index()[active_j]), 
                      p(nodes, preactive_index()[preact_k]);
