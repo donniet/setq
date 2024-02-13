@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <algorithm>
 #include <vector>
@@ -16,7 +17,7 @@
 #  define EXEUCUTION_PARALLEL
 #endif
 
-#if EXECUTION_PARALLEL
+#if EXECUTION_PARALLEL && !DEBUG
 #  define PAR_UNSEQ std::exeuction::par_unseq,
 #else
 #  define PAR_UNSEQ
@@ -285,6 +286,7 @@ float seqt::node::significance() const {
     case relationship:
         return sequence_stddevs(first->first->count, first->second->count, first->count + second->count);
     }
+    return 0.;
 }
 
 float seqt::node::activate_atom() {
@@ -335,6 +337,7 @@ float seqt::node::activate() {
     case relationship:
         return activate_relationship();
     }
+    return 0.;
 }
 
 
