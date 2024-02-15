@@ -2,57 +2,32 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(lldb) Attach",
-            "type": "cppdbg",
-            "request": "attach",
-            "program": "${command:cmake.launchTargetPath}",
-            "MIMode": "lldb",
-            "miDebuggerPath": "lldb-mi"
-        },
-        {
-            "name": "(lldb) Launch",
+            "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
             "program": "${command:cmake.launchTargetPath}",
             "args": [
-                // "${command:cmake.launchTargetDirectory}/../text/alice.txt"
-                // "abx", "43", "0.", "dump"
-                // "${command:cmake.launchTargetDirectory}/../text/test_ab.txt"
-                "-", "some testing text, and here is some more because we need a log to achieve statistical significance!"
-            ],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [
-                {
-                    "name": "PATH",
-                    "value": "$PATH:${command:cmake.launchTargetDirectory}"
-                }
-            ],
-            "externalConsole": false,
-            "MIMode": "lldb",
-            "miDebuggerPath": "lldb-mi",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                }
-            ]
-        },
-        {
-            "name": "C/C++: g++ build and debug active file",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${fileDirname}/${fileBasenameNoExtension}",
-            "args": [
-                "${command:cmake.launchTargetDirectory}/../text/alice.txt"
+                //"-", "some testing text, and here is some more because we need a log to achieve statistical significance!"
+                "${workspaceFolder}/text/alice_1.txt"
             ],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
             "externalConsole": false,
-            "MIMode": "lldb",
-            "preLaunchTask": "C/C++: g++ build active file"
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
         }
     ]
 }

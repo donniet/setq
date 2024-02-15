@@ -3,11 +3,12 @@ project(seqt VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CXX_STANDARD 20)
 add_compile_options(--std=c++20 -g)
+add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>")
 
 include_directories(include)
 
 find_package(TBB REQUIRED)
-find_package(BOOST 1.83 COMPONENTS math)
+find_package(BOOST 1.74 COMPONENTS math)
 include_directories(${Boost_INCLUDE_DIR} ${TBB_INCLUDE_DIR})
 
 # find_package(ICU 72.1 COMPONENTS uc i18n REQUIRED)

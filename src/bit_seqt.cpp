@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <algorithm>
 #include <vector>
@@ -9,14 +10,17 @@
 #include <cmath>
 #include <string>
 #include <sstream>
+#include <memory>
 
-#if __clang__ && __APPLE__
+#ifndef DEBUG
+#  if ( __clang__ && __APPLE__ )
 // disable parallel exeuction for now
-#else
-#  define EXEUCUTION_PARALLEL
+#  else
+#    define EXECUTION_PARALLEL 1
+#  endif
 #endif
 
-#if EXECUTION_PARALLEL
+#if EXECUTION_PARALLEL == 1
 #  define PAR_UNSEQ std::exeuction::par_unseq,
 #else
 #  define PAR_UNSEQ
@@ -26,27 +30,32 @@ const float statistical_significance = 3.; // standard deviations
 
 using namespace std;
 
-struct seqt {
+struct bit_seqt {
     struct node;
     struct node_ptr;
     struct node_pair;
 
-    size_t next;
+    size_t capacity;
     vector<node> nodes;
     vector<node_pair> node_index;
     vector<node_pair> suggested;
-    vector<size_t> scrap_index[2];
-    int active_scrap_id;
+    vector<size_t> active_scrap;
+    vector<size_t> preactive_scrap;
 
-    vector<size_t> & active_index() { return scrap_index[active_scrap_id]; }
-    vector<size_t> & preactive_index() { return scrap_index[1-active_scrap_id]; }
-    void rotate_active_index() { active_scrap_id = (active_scrap_id + 1) % 2; }
+
+    vector<size_t> nodes_active;
+    vector<size_t> nodes_active_scan;
+    vector<size_t> activation;
+    vector<size_t> activation_scan;
+    vector<float> charge_buffer;
 
 
     static float pvalue(size_t first, size_t second, size_t count_sequence);
 
     node_ptr ptr(size_t offset);
     node_ptr ptr(node const & n);
+
+    void grow_capacity(size_t new_capacity = 0);
 
     void save(ostream & os);
     void read(bool bit);
@@ -56,7 +65,7 @@ struct seqt {
     void pack_suggestions(node & n, node_ptr next, vector<node>::iterator output_begin);
     void pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::iterator output_begin);
 
-    seqt();
+    bit_seqt(size_t initial_size = 1024);
 };
 
 // number of standard deviations from the expected value ab is
@@ -92,12 +101,12 @@ float sequence_pvalue(size_t a, size_t b, size_t ab) {
     return 0.5 * erfc(x);
 }
 
-float seqt::pvalue(size_t first, size_t second, size_t sequence) {
+float bit_seqt::pvalue(size_t first, size_t second, size_t sequence) {
     return sequence_pvalue(first, second, sequence);
 }
 
 
-struct seqt::node_ptr {
+struct bit_seqt::node_ptr {
 private:
     vector<node> * nodes_;
     size_t offset_;
@@ -166,7 +175,7 @@ public:
 };
 
 
-struct seqt::node {
+struct bit_seqt::node {
     enum node_operation {
         atom, sequence, relationship
     } op;
@@ -176,7 +185,7 @@ struct seqt::node {
     node_ptr first;
     node_ptr second;
 
-    node() { } // no initialization for speed
+    node() : op(atom), count(0), charge(0), first(), second() { } 
     node(node_operation o, node_ptr f, node_ptr s) :
         op(o), count(0), charge(0), first(f), second(s)
     { }
@@ -202,7 +211,7 @@ struct seqt::node {
         return *this;
     }
     node & operator=(node && r) {
-        op = r.op; r.op = atom;
+        op = r.op;          r.op = atom;
         count = r.count;    r.count = 0;
         charge = r.charge;  r.charge = 0;
         first = r.first;    r.first.reset();
@@ -210,63 +219,63 @@ struct seqt::node {
         return *this;
     }
 
-    void save(seqt * s, ostream & os) const;
-    void load(seqt * s, istream & is);
+    void save(bit_seqt * s, ostream & os) const;
+    void load(bit_seqt * s, istream & is);
 
     float significance() const;
     float activate();
 };
 
-bool seqt::node_ptr::operator<(node_ptr const & r) const {
+bool bit_seqt::node_ptr::operator<(node_ptr const & r) const {
     // return &nodes_->operator[](0) + offset_ < &r.nodes_->operator[](0) + r.offset_;
     // it's fine to just use the nodes_ pointer as the reference for a less than comparison
     // and it avoids a null check
     return nodes_ + offset_ < r.nodes_ + r.offset_;
     
 }
-bool seqt::node_ptr::operator<=(node_ptr const & r) const {
+bool bit_seqt::node_ptr::operator<=(node_ptr const & r) const {
     // return &nodes_->operator[](0) + offset_ <= &r.nodes_->operator[](0) + r.offset_;
     // it's fine to just use the nodes_ pointer as the reference for a less than comparison
     // and it avoids a null check
     return nodes_ + offset_ <= r.nodes_ + r.offset_;
 }
-seqt::node & seqt::node_ptr::operator*() const {
+bit_seqt::node & bit_seqt::node_ptr::operator*() const {
     return nodes_->operator[](offset_);
 }
-seqt::node * seqt::node_ptr::operator->() const {
+bit_seqt::node * bit_seqt::node_ptr::operator->() const {
     return &nodes_->operator[](offset_);
 }
-seqt::node_ptr::operator node*() const {
+bit_seqt::node_ptr::operator node*() const {
     // we have to do a null check here I believe
     return is_null() ? nullptr : &nodes_->operator[](0) + offset_;
 }
-bool seqt::node_ptr::is_null() const {
+bool bit_seqt::node_ptr::is_null() const {
     return nodes_ == nullptr || offset_ >= nodes_->size();
 }
-seqt::node_ptr & seqt::node_ptr::operator++() {
+bit_seqt::node_ptr & bit_seqt::node_ptr::operator++() {
     if(offset_ < nodes_->size()) 
         offset_++;
 
     return *this;
 }
-seqt::node_ptr & seqt::node_ptr::operator--() {
+bit_seqt::node_ptr & bit_seqt::node_ptr::operator--() {
     if(offset_ > 0)
         offset_--;
 
     return *this;
 }
-seqt::node_ptr seqt::node_ptr::operator++(int) {
+bit_seqt::node_ptr bit_seqt::node_ptr::operator++(int) {
     node_ptr r = *this;
     operator++();
     return r;
 }
-seqt::node_ptr seqt::node_ptr::operator--(int) {
+bit_seqt::node_ptr bit_seqt::node_ptr::operator--(int) {
     node_ptr r = *this;
     operator--();
     return r;
 }
 
-float seqt::node::significance() const {
+float bit_seqt::node::significance() const {
     switch(op) {
     case atom:
         return numeric_limits<float>::max(); // atoms are infinitely significant
@@ -275,9 +284,10 @@ float seqt::node::significance() const {
     case relationship:
         return sequence_stddevs(first->first->count, first->second->count, first->count + second->count);
     }
+    return 0.;
 }
 
-float seqt::node::activate() {
+float bit_seqt::node::activate() {
     // take the charge from children
     // TODO: should this be all the charge
     switch(op) {
@@ -306,7 +316,7 @@ float seqt::node::activate() {
 
 
 
-struct seqt::node_pair {
+struct bit_seqt::node_pair {
     node_ptr first;
     node_ptr second;
     node_ptr parent;
@@ -330,14 +340,14 @@ struct seqt::node_pair {
 };
 
 
-seqt::node_ptr seqt::ptr(size_t offset) {
+bit_seqt::node_ptr bit_seqt::ptr(size_t offset) {
     return node_ptr(nodes, offset);
 }
-seqt::node_ptr seqt::ptr(node const & n) {
+bit_seqt::node_ptr bit_seqt::ptr(node const & n) {
     return node_ptr(nodes, &n - &nodes[0]);
 }
 
-void seqt::prune(size_t max_nodes) {
+void bit_seqt::prune(size_t max_nodes) {
     // // first calculate a usefulness of each node
     // vector<float> use(nodes.size());
     // scrap_nodes.resize(nodes.size());
@@ -379,27 +389,31 @@ void seqt::prune(size_t max_nodes) {
     // a linked list of bits.  
 }
 
-void seqt::read(bool bit) {
+void bit_seqt::read(bool bit) {
     using namespace std::placeholders;
 
     size_t current_size, index_size, active_count, preactive_count;
 
-    vector<size_t> nodes_active(nodes.size());
-    vector<size_t> nodes_active_scan(nodes.size());
-    vector<float> charge_buffer(nodes.size());
     
-    charge_buffer.resize(nodes.size());
+    // charge_buffer.resize(nodes.size());
 
     // add one to the node representing the bit read
     node_ptr cur = ptr(bit ? 1 : 0);
     cur->charge += 1.; // charge the atom
     cur->count++;
 
+    nodes_active.resize(nodes.size());
+    nodes_active_scan.resize(nodes.size());
+
 
     // this will keep track of the nodes that changed
     fill(PAR_UNSEQ nodes_active.begin(), nodes_active.end(), 0);
     nodes_active[cur.offset()] = 1;
     active_count = 1;
+
+    // copy the charge into the charge buffer
+    transform(PAR_UNSEQ nodes.begin(), nodes.end(), charge_buffer.begin(),
+        [&](node const & n) { return n.charge; });
 
     // activate until all nodes to be activated have been
     for(;;) {
@@ -409,7 +423,7 @@ void seqt::read(bool bit) {
         [&](node & n) {
             size_t dex = &n - &nodes[0];
 
-            cout << "nodes[" << dex << "].charge = " << n.charge << endl;
+            // cout << "nodes[" << dex << "].charge = " << n.charge << endl;
 
             // don't re-activate an already activated node
             if(nodes_active[dex])
@@ -443,10 +457,10 @@ void seqt::read(bool bit) {
     }
 
     // rotate active index;
-    rotate_active_index();
+    active_scrap.swap(preactive_scrap); 
 
     // ensure enough space in the scrap_index for the active node indices.
-    active_index().resize(active_count);
+    active_scrap.resize(active_count);
 
     // pack the active node indexes into node_index
     for_each(PAR_UNSEQ nodes_active_scan.begin(), nodes_active_scan.end(),
@@ -456,7 +470,7 @@ void seqt::read(bool bit) {
         if(i == 0 || (dex > 0 && i == nodes_active_scan[dex-1]))
             return;
 
-        active_index()[i] = dex;
+        active_scrap[i-1] = dex;
     });
 
     // minus 1 because this is an inclusive scan
@@ -464,12 +478,12 @@ void seqt::read(bool bit) {
     size_t new_node_begin = nodes.size();
 
     // look for sequences of the same node (we'll use the nodes_active vector as scrap)
-    nodes_active.resize(active_count);
-    nodes_active_scan.resize(active_count);
+    activation.resize(active_count);
+    activation_scan.resize(active_count);
 
-    for_each(PAR_UNSEQ active_index().begin(), active_index().end(), 
+    for_each(PAR_UNSEQ active_scrap.begin(), active_scrap.end(), 
     [&](size_t const & active_i) {
-        size_t dex = &active_i - &active_index()[0];
+        size_t dex = &active_i - &active_scrap[0];
 
         // cout << "nodes[" << dex << "].charge = " << nodes[dex].charge << endl;
 
@@ -479,29 +493,33 @@ void seqt::read(bool bit) {
            !pair_exists(ptr(dex), ptr(dex)) &&
             abs(nodes[dex].significance()) > statistical_significance)
 
-            nodes_active[dex] = 1;
+            activation[dex] = 1;
         else
-            nodes_active[dex] = 0;
+            activation[dex] = 0;
     });
 
     // how many self-sequences will we create?
-    inclusive_scan(PAR_UNSEQ nodes_active.begin(), nodes_active.end(),
-        nodes_active_scan.begin());
-    active_count = nodes_active_scan.back();
+    inclusive_scan(PAR_UNSEQ activation.begin(), activation.end(),
+        activation_scan.begin());
+    active_count = activation_scan.back();
 
     // pack the new nodes and add their indexes
     if(active_count > 0) {
+        if(2*(nodes.size() + active_count) >= capacity) {
+            grow_capacity(4*(nodes.size() + active_count));
+        }
+
         node_index.resize(node_index.size() + active_count);
         nodes.resize(nodes.size() + active_count);
 
-        for_each(PAR_UNSEQ nodes_active_scan.begin(), nodes_active_scan.end(), 
+        for_each(PAR_UNSEQ activation_scan.begin(), activation_scan.end(), 
         [&](size_t const & i) {
-            size_t dex = &i - &nodes_active_scan[0];
+            size_t dex = &i - &activation_scan[0];
 
-            if(i == 0 || (dex > 0 && i == nodes_active_scan[dex-1]))
+            if(i == 0 || (dex > 0 && i == activation_scan[dex-1]))
                 return;
             
-            node_ptr c = ptr(active_index()[dex]);
+            node_ptr c = ptr(active_scrap[dex]);
             nodes[new_node_begin + (i - 1)] = node(node::sequence, c, c);
             node_index[new_node_index_begin + (i - 1)] = node_pair(c, c, node_ptr::null());
         });
@@ -517,23 +535,24 @@ void seqt::read(bool bit) {
     // TODO: Maybe this could be probabilistic?  choose N potential pairs
     //  randomly and check those.  N can be chosen based on a certain bitrate
     //  we are aiming at.
-    nodes_active.resize(active_index().size() * preactive_index().size());
-    nodes_active_scan.resize(active_index().size() * preactive_index().size());
+    activation.resize(active_scrap.size() * preactive_scrap.size());
+    activation_scan.resize(active_scrap.size() * preactive_scrap.size());
 
-    if(nodes_active.size() > 0) {
-        for_each(PAR_UNSEQ nodes_active.begin(), nodes_active.end(),
+    if(activation.size() > 0) {
+        for_each(PAR_UNSEQ activation.begin(), activation.end(),
         [&](size_t & c) {
-            size_t i = &c - &nodes_active[0];
-            size_t active_j = i / active_index().size();
-            size_t preact_k = i % active_index().size();
-
-            if(active_j == preact_k)
-                return;
-
-            node_ptr a(nodes, active_index()[active_j]), 
-                     p(nodes, preactive_index()[preact_k]);
+            size_t i = &c - &activation[0];
+            size_t active_j = i / active_scrap.size();
+            size_t preact_k = i % active_scrap.size();
 
             c = 0;
+
+            if(active_scrap[active_j] <= preactive_scrap[preact_k])
+                return;
+
+            node_ptr a(nodes, active_scrap[active_j]), 
+                     p(nodes, preactive_scrap[preact_k]);
+
 
             if(pair_exists(a, p))
                 return;
@@ -547,24 +566,28 @@ void seqt::read(bool bit) {
             c = 1;
         });
 
-        inclusive_scan(PAR_UNSEQ nodes_active.begin(), nodes_active.end(), 
-            nodes_active_scan.begin());
-        active_count = nodes_active_scan.back();
+        inclusive_scan(PAR_UNSEQ activation.begin(), activation.end(), 
+            activation_scan.begin());
+        active_count = activation_scan.back();
+
+        if(2*(nodes.size() + 3*active_count) >= capacity) {
+            grow_capacity(4*(nodes.size() + 3*active_count));
+        }
 
         node_index.resize(node_index.size() + active_count);
         nodes.resize(nodes.size() + 3 * active_count);
 
-        for_each(PAR_UNSEQ nodes_active_scan.begin(), nodes_active_scan.end(),
+        for_each(PAR_UNSEQ activation_scan.begin(), activation_scan.end(),
         [&](size_t const & c) {
-            size_t i = &c - &nodes_active_scan[0];
-            size_t active_j = i / active_index().size();
-            size_t preact_k = i % active_index().size();
+            size_t i = &c - &activation_scan[0];
+            size_t active_j = i / active_scrap.size();
+            size_t preact_k = i % active_scrap.size();
 
-            if(c == 0 || (i > 0 && c == nodes_active_scan[i-1]))
+            if(c == 0 || (i > 0 && c == activation_scan[i-1]))
                 return;
 
-            node_ptr a(nodes, active_index()[active_j]), 
-                     p(nodes, preactive_index()[preact_k]);
+            node_ptr a(nodes, active_scrap[active_j]), 
+                     p(nodes, preactive_scrap[preact_k]);
 
             // calculate the offset to this new node (each new node actually creates 3 node entries)
             size_t off = 3*(c-1);
@@ -596,18 +619,46 @@ void seqt::read(bool bit) {
 }
 
 
-void seqt::save(ostream & os) {
+void bit_seqt::save(ostream & os) {
     for(node const & n : nodes) {
         n.save(this, os);
     }
 }
 
-bool seqt::pair_exists(node_ptr first, node_ptr second) {
+bool bit_seqt::pair_exists(node_ptr first, node_ptr second) {
     return binary_search(node_index.begin(), node_index.end(), node_pair(first, second, node_ptr::null()));
 }
 
-seqt::seqt() : active_scrap_id(0)
+void bit_seqt::grow_capacity(size_t new_capacity) {
+    if(new_capacity == 0)
+        capacity = 2 * capacity;
+    else
+        capacity = new_capacity;
+
+    nodes.reserve(capacity);
+    
+    node_index.reserve(capacity);
+    suggested.reserve(capacity);
+    active_scrap.reserve(capacity);
+    preactive_scrap.reserve(capacity);
+    activation.reserve(capacity * capacity);
+    activation_scan.reserve(capacity * capacity);
+
+    nodes_active.reserve(capacity);
+    nodes_active_scan.reserve(capacity);
+    charge_buffer.reserve(capacity);
+}
+
+bit_seqt::bit_seqt(size_t initial_size) 
+    : capacity(initial_size)
 {
+    
+    grow_capacity(capacity);
+    
+    nodes.resize(2);
+    nodes[0] = node();  // zero atom
+    nodes[1] = node();  // one atom 
+
     /*
     0 and 1 are atoms
     0_1 and 1_0 are created right away
@@ -624,10 +675,7 @@ seqt::seqt() : active_scrap_id(0)
     */
 
     // TODO: zero out everything else
-    nodes.resize(2);
-    nodes[0] = node(node::atom, node_ptr::null(), node_ptr::null());  // zero atom
-    nodes[1] = node(node::atom, node_ptr::null(), node_ptr::null());  // one atom 
-    next = nodes.size();
+
 
     // 0_1 sequence
     // nodes[2] = node(2, node::sequence, node_ptr(nodes, 0), node_ptr(nodes, 1));
@@ -645,7 +693,7 @@ seqt::seqt() : active_scrap_id(0)
 }
 
 
-void seqt::node::save(seqt * s, ostream & os) const {
+void bit_seqt::node::save(bit_seqt * s, ostream & os) const {
     os.write((const char*)&count, sizeof(count));         //  .count
     os.write((const char*)&charge, sizeof(charge));       //  .charge
 
@@ -657,12 +705,12 @@ void seqt::node::save(seqt * s, ostream & os) const {
     if(dex < 0) dex = -1;
     os.write((const char*)&dex, sizeof(dex));
 
-    // dex = parent - &s->nodes[0];
+    // dex = parent - &s->nodes[0];  
     // if(dex < 0) dex = -1;
     // os.write((const char *)&dex, sizeof(dex));
 }
 
-void seqt::node::load(seqt * s, istream & is) {
+void bit_seqt::node::load(bit_seqt * s, istream & is) {
     is.read((char*)&count, sizeof(count));         //  .count
     is.read((char*)&charge, sizeof(charge));       //  .charge
 
@@ -681,21 +729,21 @@ void seqt::node::load(seqt * s, istream & is) {
 }
 
 
-void print_seqt(seqt const & s, ostream & os) {
+void print_seqt(bit_seqt const & s, ostream & os) {
     os << setw(12) << 0 << "| atm " << setw(12) << s.nodes[0].count << "\n";
     os << setw(12) << 1 << "| atm " << setw(12) << s.nodes[1].count << "\n";
 
     for(int i = 2; i < s.nodes.size(); i++) {
-        seqt::node const & n = s.nodes[i];
+        bit_seqt::node const & n = s.nodes[i];
         os  << setw(12) << i;
 
         switch(n.op) {
-        case seqt::node::sequence:
+        case bit_seqt::node::sequence:
             os  << "| seq " << setw(12) << n.count << " : " 
                 << setw(12) << sequence_stddevs(n.first->count, n.second->count, n.count) << "% ("
                 << setw(12) << n.first.offset() << " ," << setw(12) << n.second.offset() << " )\n";
             break;
-        case seqt::node::relationship:
+        case bit_seqt::node::relationship:
             os  << "| rel " << setw(12) << n.count << " : " 
                 << setw(12) << sequence_stddevs(n.first->first->count, n.first->second->count, n.first->count + n.second->count) << "%  "
                 << setw(12) << n.first->first.offset() << " ~" << setw(12) << n.first->second.offset() << "  \n";
@@ -709,34 +757,22 @@ void print_seqt(seqt const & s, ostream & os) {
 
 
 int main(int ac, char ** av) {
-    seqt s;
+    bit_seqt s;
 
     istream * is = &cin;
     stringstream line;
-
-    auto p0 = seqt::node_pair(s.ptr(0), s.ptr(1), seqt::node_ptr::null());
-    auto p2 = seqt::node_pair(s.ptr(0), s.ptr(2), seqt::node_ptr::null());
-    auto p1 = seqt::node_pair(s.ptr(1), s.ptr(0), seqt::node_ptr::null());
-    auto p3 = seqt::node_pair(s.ptr(1), s.ptr(2), seqt::node_ptr::null());
-
-    if(p0.first != p1.first)
-        throw std::logic_error("node_pair not ordered properly");
-
-    if(p0 < p1 || p1 < p0)
-        throw std::logic_error("node_pair less operator not working properly");
-
-    if(p2 < p0)
-        throw std::logic_error("node_pair less operator not working");
-
-    if(p3 < p2)
-        throw std::logic_error("node_pair less error");
-    
-    if(p3 < p0)
-        throw std::logic_error("node_pair");
+    fstream f;
 
     if(ac > 2 && string(av[ac-2]) == "-") {
         line = stringstream(string(av[ac-1]));
         is = &line;
+    } else if(ac == 2) {
+        f.open(av[1]);
+        if(!f) {
+            cerr << "error opening '" << av[1] << "'\n";
+            return -1;
+        }
+        is = &f;
     }
 
     for(;;) {
@@ -747,7 +783,9 @@ int main(int ac, char ** av) {
 
         unsigned char mask = 0x80;
         while(mask != 0) {
-            s.read(c & mask);
+            try {
+                s.read(c & mask);
+            } catch(
             mask >>= 1;
         }
     }
