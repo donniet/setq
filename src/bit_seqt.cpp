@@ -12,21 +12,20 @@
 #include <sstream>
 #include <memory>
 
-#ifndef DEBUG
+// #ifndef DEBUG
 #  if ( __clang__ && __APPLE__ )
 // disable parallel exeuction for now
 #  else
 #    define EXECUTION_PARALLEL 1
 #  endif
-#endif
+// #endif
 
 #if EXECUTION_PARALLEL == 1
-#  define PAR_UNSEQ std::exeuction::par_unseq,
+#  define PAR_UNSEQ std::execution::par_unseq,
 #else
 #  define PAR_UNSEQ
 #endif
 
-const float statistical_significance = 5.; // standard deviations
 
 using namespace std;
 
@@ -34,6 +33,9 @@ struct bit_seqt {
     struct node;
     struct node_ptr;
     struct node_pair;
+
+    static constexpr float statistical_significance = 9.; // standard deviations
+    static constexpr size_t max_allocation = 16e9; // 16GB
 
     size_t capacity;
     vector<node> nodes;
@@ -224,6 +226,7 @@ struct bit_seqt::node {
 
     float significance() const;
     float activate();
+    bool is_active() const;
 };
 
 bool bit_seqt::node_ptr::operator<(node_ptr const & r) const {
@@ -276,6 +279,9 @@ bit_seqt::node_ptr bit_seqt::node_ptr::operator--(int) {
 }
 
 float bit_seqt::node::significance() const {
+
+    if(count < 10) return 0;
+
     switch(op) {
     case atom:
         return numeric_limits<float>::max(); // atoms are infinitely significant
@@ -285,6 +291,30 @@ float bit_seqt::node::significance() const {
         return sequence_stddevs(first->first->count, first->second->count, first->count + second->count);
     }
     return 0.;
+}
+
+bool bit_seqt::node::is_active() const {
+    switch(op) {
+    case atom:
+        // atoms are activated by the read function
+        if(charge >= 1.) 
+            return true;
+
+        break;
+    case sequence:
+        if((first == second && first->charge >= 1.5) ||
+           (second->charge >= 1. && first->charge >= 0.5 && first->charge < 1.)) 
+            return true;
+
+        break;
+    case relationship:
+        if(first->first->charge >= 1. || first->second->charge >= 1.)
+            return true;
+        
+        break;
+    }
+
+    return false;
 }
 
 float bit_seqt::node::activate() {
@@ -404,6 +434,7 @@ void bit_seqt::read(bool bit) {
 
     nodes_active.resize(nodes.size());
     nodes_active_scan.resize(nodes.size());
+    charge_buffer.resize(nodes.size());
 
 
     // this will keep track of the nodes that changed
@@ -429,9 +460,11 @@ void bit_seqt::read(bool bit) {
             if(nodes_active[dex])
                 return;
 
-            charge_buffer[dex] = n.activate();
-            if(charge_buffer[dex] != n.charge) 
+            if(n.is_active()) {
+                n.count++;
+                charge_buffer[dex] += 1.;
                 nodes_active[dex] = 1;
+            }
         });
 
         // unbuffer the new charge2 values back into charge
@@ -490,12 +523,15 @@ void bit_seqt::read(bool bit) {
         // is this node in sequence with itself?
         // and is that node
         if( nodes[dex].charge >= 1.5 && 
+            nodes[dex].count > 1000 &&
            !pair_exists(ptr(dex), ptr(dex)) &&
-            abs(nodes[dex].significance()) > statistical_significance)
-
+            abs(nodes[dex].significance()) > statistical_significance) 
+        {
             activation[dex] = 1;
-        else
-            activation[dex] = 0;
+            return;
+        }
+        
+        activation[dex] = 0;
     });
 
     // how many self-sequences will we create?
@@ -518,14 +554,17 @@ void bit_seqt::read(bool bit) {
 
             if(i == 0 || (dex > 0 && i == activation_scan[dex-1]))
                 return;
+
+            node_ptr c = ptr(dex);
             
-            node_ptr c = ptr(active_scrap[dex]);
             nodes[new_node_begin + (i - 1)] = node(node::sequence, c, c);
-            node_index[new_node_index_begin + (i - 1)] = node_pair(c, c, node_ptr::null());
+            node_index[new_node_index_begin + (i - 1)] = node_pair(c, c, ptr(new_node_begin + (i - 1)));
         });
 
         new_node_index_begin = node_index.size();
         new_node_begin = nodes.size();
+
+        sort(PAR_UNSEQ node_index.begin(), node_index.end());
     }
 
 
@@ -553,6 +592,8 @@ void bit_seqt::read(bool bit) {
             node_ptr a(nodes, active_scrap[active_j]), 
                      p(nodes, preactive_scrap[preact_k]);
 
+            if(a->count < 1000 && p->count < 1000)
+                return;
 
             if(pair_exists(a, p))
                 return;
@@ -562,6 +603,9 @@ void bit_seqt::read(bool bit) {
 
             if(abs(a->significance()) < statistical_significance)
                 return;
+
+            // now look to see if a or p contain the other
+            // find a in p:
 
             c = 1;
         });
@@ -589,6 +633,8 @@ void bit_seqt::read(bool bit) {
             node_ptr a(nodes, active_scrap[active_j]), 
                      p(nodes, preactive_scrap[preact_k]);
 
+            // TODO: find the right insertion point to make relationships a valid binary tree
+
             // calculate the offset to this new node (each new node actually creates 3 node entries)
             size_t off = 3*(c-1);
             
@@ -600,6 +646,9 @@ void bit_seqt::read(bool bit) {
             s.count = 0;
             s.charge = 0;
 
+            if(a < p)
+                swap(r,s); // ensure that this is an ordered tree
+
             node & t = nodes[new_node_begin + off + 2] = node(node::relationship, ptr(r), ptr(s));
             t.count = a->count + p->count;
             t.charge = 0;
@@ -608,6 +657,11 @@ void bit_seqt::read(bool bit) {
             off = (c-1);
             node_index[new_node_index_begin + off] = node_pair(p, a, ptr(t));
         });
+
+        new_node_index_begin = node_index.size();
+        new_node_begin = nodes.size();
+
+        sort(PAR_UNSEQ node_index.begin(), node_index.end());
     }
 
     // now divide all the charges by 2 to get ready for the next run
@@ -631,9 +685,19 @@ bool bit_seqt::pair_exists(node_ptr first, node_ptr second) {
 
 void bit_seqt::grow_capacity(size_t new_capacity) {
     if(new_capacity == 0)
-        capacity = 2 * capacity;
-    else
-        capacity = new_capacity;
+        new_capacity = 2 * capacity;
+
+    if((sizeof(nodes.front()) + sizeof(node_index.front()) + sizeof(suggested.front()) + sizeof(active_scrap.front()) + 
+        sizeof(preactive_scrap.front()) + sizeof(nodes_active.front()) + sizeof(nodes_active_scan.front()) + sizeof(charge_buffer.front())) 
+            * new_capacity + 
+       (sizeof(activation.front()) + sizeof(activation_scan.front())) 
+            * (new_capacity * new_capacity) 
+        > max_allocation) 
+    {
+        throw logic_error("bad_alloc");
+    }
+
+    capacity = new_capacity;
 
     nodes.reserve(capacity);
     
@@ -775,19 +839,33 @@ int main(int ac, char ** av) {
         is = &f;
     }
 
+    unsigned char c, mask;
+
     for(;;) {
-        unsigned char c = is->get();
+        c = is->get();
         
         if(is->eof())
             break;
 
-        unsigned char mask = 0x80;
+        mask = 0x80;
         while(mask != 0) {
-            s.read(c & mask);
+            try {
+                s.read(c & mask);
+            } catch(logic_error e) {
+                cerr << "# Exception: " << e.what() << endl;
+                goto end_read_loop;
+            }
             mask >>= 1;
         }
     }
+end_read_loop:
+    size_t bytes_read = is->tellg();
 
+    cerr << "# read bytes: " << bytes_read << endl;
+
+    for(auto const & pair : s.node_index) {
+        cout << "index: " << pair.first.offset() << " - " << pair.second.offset() << endl;
+    }
 
     // fstream file("seqt.bin", ios::binary | ios::trunc | ios::out);
     // s.save(file);
