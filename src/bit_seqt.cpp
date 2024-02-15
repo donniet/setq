@@ -26,7 +26,7 @@
 #  define PAR_UNSEQ
 #endif
 
-const float statistical_significance = 3.; // standard deviations
+const float statistical_significance = 5.; // standard deviations
 
 using namespace std;
 
@@ -542,8 +542,8 @@ void bit_seqt::read(bool bit) {
         for_each(PAR_UNSEQ activation.begin(), activation.end(),
         [&](size_t & c) {
             size_t i = &c - &activation[0];
-            size_t active_j = i / active_scrap.size();
-            size_t preact_k = i % active_scrap.size();
+            size_t active_j = i / preactive_scrap.size();
+            size_t preact_k = i % preactive_scrap.size();
 
             c = 0;
 
@@ -580,8 +580,8 @@ void bit_seqt::read(bool bit) {
         for_each(PAR_UNSEQ activation_scan.begin(), activation_scan.end(),
         [&](size_t const & c) {
             size_t i = &c - &activation_scan[0];
-            size_t active_j = i / active_scrap.size();
-            size_t preact_k = i % active_scrap.size();
+            size_t active_j = i / preactive_scrap.size();
+            size_t preact_k = i % preactive_scrap.size();
 
             if(c == 0 || (i > 0 && c == activation_scan[i-1]))
                 return;
@@ -783,9 +783,7 @@ int main(int ac, char ** av) {
 
         unsigned char mask = 0x80;
         while(mask != 0) {
-            try {
-                s.read(c & mask);
-            } catch(
+            s.read(c & mask);
             mask >>= 1;
         }
     }
