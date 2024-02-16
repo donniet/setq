@@ -12,13 +12,13 @@
 #include <sstream>
 #include <memory>
 
-// #ifndef DEBUG
+#ifndef DEBUG
 #  if ( __clang__ && __APPLE__ )
 // disable parallel exeuction for now
 #  else
 #    define EXECUTION_PARALLEL 1
 #  endif
-// #endif
+#endif
 
 #if EXECUTION_PARALLEL == 1
 #  define PAR_UNSEQ std::execution::par_unseq,
@@ -63,8 +63,9 @@ struct bit_seqt {
     void read(bool bit);
     void prune(size_t max_nodes);
     bool pair_exists(node_ptr first, node_ptr second);
+    float significance(node const & n);
     node_ptr ancestor(node_ptr first, node_ptr second);
-    node create_relationship(node_ptr first, node_ptr second);
+    void create_relationship(node_ptr rel, node_ptr a, node_ptr b);
     bool is_novel_suggestion(node_ptr first, node_ptr second);
     void pack_suggestions(node & n, node_ptr next, vector<node>::iterator output_begin);
     void pack_suggestion_index(node & n, node_ptr next, vector<node_pair>::iterator output_begin);
@@ -230,7 +231,6 @@ struct bit_seqt::node {
     void save(bit_seqt * s, ostream & os) const;
     void load(bit_seqt * s, istream & is);
 
-    float significance() const;
     float activate();
     bool is_active() const;
 };
@@ -282,21 +282,6 @@ bit_seqt::node_ptr bit_seqt::node_ptr::operator--(int) {
     node_ptr r = *this;
     operator--();
     return r;
-}
-
-float bit_seqt::node::significance() const {
-
-    if(count < 10) return 0;
-
-    switch(op) {
-    case atom:
-        return numeric_limits<float>::max(); // atoms are infinitely significant
-    case sequence:
-        return sequence_stddevs(first->count, second->count, count);
-    case relationship:
-        return sequence_stddevs(first->first->count, first->second->count, first->count + second->count);
-    }
-    return 0.;
 }
 
 bool bit_seqt::node::is_active() const {
@@ -374,6 +359,27 @@ struct bit_seqt::node_pair {
         return second < r.second;
     }
 };
+
+
+float bit_seqt::significance(node const & n) {
+
+    if(n.count < 10) return 0;
+
+    switch(n.op) {
+    case node::atom:
+        return numeric_limits<float>::max(); // atoms are infinitely significant
+    case node::sequence:
+        return sequence_stddevs(n.first->count, n.second->count, n.count);
+    case node::relationship:
+        // get the counts of the two sequences of this relationship
+        auto p = lower_bound(node_index.begin(), node_index.end(), node_pair(n.first, n.second, node_ptr::null()));
+        
+        return sequence_stddevs(n.first->count, n.second->count, p->parent->count + ptr(p->parent.offset() + 1)->count);
+        // return sequence_stddevs(n.first->first->count, n.first->second->count, n.first->count + n.second->count);
+    }
+    return 0.;
+}
+
 
 
 bit_seqt::node_ptr bit_seqt::ptr(size_t offset) {
@@ -531,7 +537,7 @@ void bit_seqt::read(bool bit) {
         if( nodes[dex].charge >= 1.5 && 
             // nodes[dex].count > 1000 &&
            !pair_exists(ptr(dex), ptr(dex)) &&
-            abs(nodes[dex].significance()) > statistical_significance) 
+            abs(significance(nodes[dex])) > statistical_significance) 
         {
             activation[dex] = 1;
             return;
@@ -601,10 +607,10 @@ void bit_seqt::read(bool bit) {
             // if(a->count < 1000 && p->count < 1000)
             //     return;
             
-            if(abs(p->significance()) < statistical_significance)
+            if(abs(significance(*p)) < statistical_significance)
                 return;
 
-            if(abs(a->significance()) < statistical_significance)
+            if(abs(significance(*a)) < statistical_significance)
                 return;
             
             // TODO: this function is not a great parallel function...
@@ -654,8 +660,9 @@ void bit_seqt::read(bool bit) {
             s.count = 0;
             s.charge = 0;
 
+            node_ptr t = ptr(new_node_begin + off + 2);
             // now we have to find the right insertion point for this new node:
-            node & t = nodes[new_node_begin + off + 2] = create_relationship(a, p);
+            create_relationship(t, a, p);
 
             // node & t = nodes[new_node_begin + off + 2] = node(node::relationship, ptr(r), ptr(s));
             // t.count = a->count + p->count;
@@ -663,7 +670,7 @@ void bit_seqt::read(bool bit) {
 
             // now add this node to the node_index
             off = (c-1);
-            node_index[new_node_index_begin + off] = node_pair(p, a, ptr(t));
+            node_index[new_node_index_begin + off] = node_pair(p, a, t);
         });
 
         new_node_index_begin = node_index.size();
@@ -691,9 +698,9 @@ bool bit_seqt::pair_exists(node_ptr first, node_ptr second) {
     return binary_search(node_index.begin(), node_index.end(), node_pair(first, second, node_ptr::null()));
 }
 
-bit_seqt::node bit_seqt::create_relationship(node_ptr a, node_ptr b) {
+void bit_seqt::create_relationship(node_ptr rel, node_ptr a, node_ptr b) {
     for(;;) {
-        if(abs(a->significance()) > abs(b->significance()))
+        if(abs(significance(*a)) > abs(significance(*b)))
             swap(a, b);
         
         if(!b->parent.is_null())
@@ -707,13 +714,14 @@ bit_seqt::node bit_seqt::create_relationship(node_ptr a, node_ptr b) {
     }
 
 
-    node ret;
-    ret.op = node::relationship;
-    ret.first = a;
-    ret.second = b;
-    ret.count = a->count + b->count;
-    ret.charge = 0.;
-    return ret;
+    rel->op = node::relationship;
+    rel->first = a;
+    rel->second = b;
+    rel->count = a->count + b->count;
+    rel->charge = 0.;
+
+    a->parent = rel;
+    b->parent = rel;
 }
 
 bit_seqt::node_ptr bit_seqt::ancestor(node_ptr first, node_ptr second) {
