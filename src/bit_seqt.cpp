@@ -44,6 +44,7 @@ struct bit_seqt {
     vector<size_t> active_scrap;
     vector<size_t> preactive_scrap;
 
+    vector<size_t> ancestor_of;
 
     vector<size_t> nodes_active;
     vector<size_t> nodes_active_scan;
@@ -64,7 +65,6 @@ struct bit_seqt {
     void prune(size_t max_nodes);
     bool pair_exists(node_ptr first, node_ptr second);
     float significance(node const & n);
-    node_ptr ancestor(node_ptr first, node_ptr second);
     void create_relationship(node_ptr rel, node_ptr a, node_ptr b);
     bool is_novel_suggestion(node_ptr first, node_ptr second);
     void pack_suggestions(node & n, node_ptr next, vector<node>::iterator output_begin);
@@ -340,10 +340,9 @@ float bit_seqt::node::activate() {
 struct bit_seqt::node_pair {
     node_ptr first;
     node_ptr second;
-    node_ptr parent;
 
-    node_pair() : first(), second(), parent() {}
-    node_pair(node_ptr f, node_ptr s, node_ptr p) : parent(p) {
+    node_pair() : first(), second()  {}
+    node_pair(node_ptr f, node_ptr s)  {
         if(f < s) {
             first = f; 
             second = s;
@@ -371,11 +370,7 @@ float bit_seqt::significance(node const & n) {
     case node::sequence:
         return sequence_stddevs(n.first->count, n.second->count, n.count);
     case node::relationship:
-        // get the counts of the two sequences of this relationship
-        auto p = lower_bound(node_index.begin(), node_index.end(), node_pair(n.first, n.second, node_ptr::null()));
-        
-        return sequence_stddevs(n.first->count, n.second->count, p->parent->count + ptr(p->parent.offset() + 1)->count);
-        // return sequence_stddevs(n.first->first->count, n.first->second->count, n.first->count + n.second->count);
+        return sequence_stddevs(n.first->first->count, n.first->second->count, n.first->count + n.second->count);
     }
     return 0.;
 }
@@ -570,7 +565,8 @@ void bit_seqt::read(bool bit) {
             node_ptr c = ptr(dex);
             
             nodes[new_node_begin + (i - 1)] = node(node::sequence, c, c);
-            node_index[new_node_index_begin + (i - 1)] = node_pair(c, c, ptr(new_node_begin + (i - 1)));
+            ancestor_of[new_node_begin + (i - 1)] = new_node_begin + (i - 1);
+            node_index[new_node_index_begin + (i - 1)] = node_pair(c, c);
         });
 
         new_node_index_begin = node_index.size();
@@ -607,33 +603,29 @@ void bit_seqt::read(bool bit) {
             // if(a->count < 1000 && p->count < 1000)
             //     return;
             
-            if(abs(significance(*p)) < statistical_significance)
+            if(abs(significance(*p)) < statistical_significance &&
+               abs(significance(*a)) < statistical_significance)
                 return;
 
-            if(abs(significance(*a)) < statistical_significance)
-                return;
-            
-            // TODO: this function is not a great parallel function...
-            node_ptr g = ancestor(a, p);
-            if(!g.is_null())
+            c = 2;
+
+            // now see if we should group these into a relationship or not
+            if(ancestor_of[p.offset()] == ancestor_of[a.offset()])
                 return;
 
-            // now look to see if a or p contain the other
-            // find a in p:
-
-            c = 1;
+            c = 3;
         });
 
         inclusive_scan(PAR_UNSEQ activation.begin(), activation.end(), 
             activation_scan.begin());
         active_count = activation_scan.back();
 
-        if(2*(nodes.size() + 3*active_count) >= capacity) {
-            grow_capacity(4*(nodes.size() + 3*active_count));
+        if(2*(nodes.size() + active_count) >= capacity) {
+            grow_capacity(4*(nodes.size() + active_count));
         }
 
         node_index.resize(node_index.size() + active_count);
-        nodes.resize(nodes.size() + 3 * active_count);
+        nodes.resize(nodes.size() + active_count);
 
         for_each(PAR_UNSEQ activation_scan.begin(), activation_scan.end(),
         [&](size_t const & c) {
@@ -644,33 +636,51 @@ void bit_seqt::read(bool bit) {
             if(c == 0 || (i > 0 && c == activation_scan[i-1]))
                 return;
 
+            size_t diff = c;
+            if(i > 0) 
+                diff -= activation_scan[i-1];
+
             node_ptr a(nodes, active_scrap[active_j]), 
                      p(nodes, preactive_scrap[preact_k]);
 
             // TODO: find the right insertion point to make relationships a valid binary tree
 
             // calculate the offset to this new node (each new node actually creates 3 node entries)
-            size_t off = 3*(c-1);
+            size_t off = (c-diff);
             
             node & r = nodes[new_node_begin + off] = node(node::sequence, p, a);
             r.count = 1;
             r.charge = 0;
+            ancestor_of[new_node_begin + off] = new_node_begin + off;
 
             node & s = nodes[new_node_begin + off + 1] = node(node::sequence, a, p);
             s.count = 0;
             s.charge = 0;
+            ancestor_of[new_node_begin + off + 1] = new_node_begin + off + 1;
 
-            node_ptr t = ptr(new_node_begin + off + 2);
-            // now we have to find the right insertion point for this new node:
-            create_relationship(t, a, p);
+            // add our sequence to the index
+            node_index[new_node_index_begin + off] = node_pair(p, a);
+
+            // should we also create a new relationship?
+            if(diff < 3) 
+                return;
+
+            // join these two relationships
+            // TODO: maybe splay or otherwise reorganize the hierarchy at this step
+            // node & t = nodes[new_node_begin + off + 2] = node(node::relationship, ptr(ancestor_of[p.offset()]), ptr(ancestor_of[a.offset()]));
+            node & t = nodes[new_node_begin + off + 2] = node(node::relationship, ptr(r), ptr(s));
+            t.count = a->count + p->count;
+            t.charge = 0;
+            ancestor_of[p.offset()] = new_node_begin + off + 2;
+            ancestor_of[a.offset()] = new_node_begin + off + 2;
+
+            
 
             // node & t = nodes[new_node_begin + off + 2] = node(node::relationship, ptr(r), ptr(s));
             // t.count = a->count + p->count;
             // t.charge = 0;
 
             // now add this node to the node_index
-            off = (c-1);
-            node_index[new_node_index_begin + off] = node_pair(p, a, t);
         });
 
         new_node_index_begin = node_index.size();
@@ -695,56 +705,15 @@ void bit_seqt::save(ostream & os) {
 }
 
 bool bit_seqt::pair_exists(node_ptr first, node_ptr second) {
-    return binary_search(node_index.begin(), node_index.end(), node_pair(first, second, node_ptr::null()));
+    return binary_search(node_index.begin(), node_index.end(), node_pair(first, second));
 }
 
-void bit_seqt::create_relationship(node_ptr rel, node_ptr a, node_ptr b) {
-    for(;;) {
-        if(abs(significance(*a)) > abs(significance(*b)))
-            swap(a, b);
-        
-        if(!b->parent.is_null())
-            b = b->parent;
-
-        if(!a->parent.is_null())
-            a = a->parent;
-
-        // both parents are null
-        break;
-    }
-
-
-    rel->op = node::relationship;
-    rel->first = a;
-    rel->second = b;
-    rel->count = a->count + b->count;
-    rel->charge = 0.;
-
-    a->parent = rel;
-    b->parent = rel;
-}
-
-bit_seqt::node_ptr bit_seqt::ancestor(node_ptr first, node_ptr second) {
-    vector<node_ptr> first_parents;
-    for(node_ptr p = first; !p.is_null(); p = p->parent) {
-        first_parents.push_back(p);
-    }
-
-    sort(PAR_UNSEQ first_parents.begin(), first_parents.end());
-
-    for(node_ptr q = second; !q.is_null(); q = q->parent) {
-        if(binary_search(first_parents.begin(), first_parents.end(), q))
-            return q;
-    }
-
-    return node_ptr::null();
-}
 
 void bit_seqt::grow_capacity(size_t new_capacity) {
     if(new_capacity == 0)
         new_capacity = 2 * capacity;
 
-    if((sizeof(nodes.front()) + sizeof(node_index.front()) + sizeof(suggested.front()) + sizeof(active_scrap.front()) + 
+    if((sizeof(nodes.front()) + sizeof(node_index.front()) + sizeof(ancestor_of.front()) + sizeof(suggested.front()) + sizeof(active_scrap.front()) + 
         sizeof(preactive_scrap.front()) + sizeof(nodes_active.front()) + sizeof(nodes_active_scan.front()) + sizeof(charge_buffer.front())) 
             * new_capacity + 
        (sizeof(activation.front()) + sizeof(activation_scan.front())) 
@@ -759,6 +728,7 @@ void bit_seqt::grow_capacity(size_t new_capacity) {
     nodes.reserve(capacity);
     
     node_index.reserve(capacity);
+    ancestor_of.reserve(capacity);
     suggested.reserve(capacity);
     active_scrap.reserve(capacity);
     preactive_scrap.reserve(capacity);
