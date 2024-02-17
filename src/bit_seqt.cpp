@@ -626,6 +626,7 @@ void bit_seqt::read(bool bit) {
 
         node_index.resize(node_index.size() + active_count);
         nodes.resize(nodes.size() + active_count);
+        ancestor_of.resize(nodes.size() + active_count);
 
         for_each(PAR_UNSEQ activation_scan.begin(), activation_scan.end(),
         [&](size_t const & c) {
@@ -682,6 +683,19 @@ void bit_seqt::read(bool bit) {
 
             // now add this node to the node_index
         });
+
+        // now we use nodes_active to fix all our ancestors
+        for_each(PAR_UNSEQ nodes.begin(), nodes.end(),
+        [&](const node & n) {
+            size_t dex = &n - &nodes[0];
+            nodes_active[dex] = ancestor_of[dex];
+
+            while(nodes_active[dex] < ancestor_of[nodes_active[dex]])
+                nodes_active[dex] = ancestor_of[nodes_active[dex]];
+        });
+
+        // and copy it back into the ancestor
+        copy(PAR_UNSEQ nodes_active.begin(), nodes_active.end(), ancestor_of.begin());
 
         new_node_index_begin = node_index.size();
         new_node_begin = nodes.size();
